@@ -1,0 +1,9 @@
+{
+  "name": "@bu-draft/server",
+  "version": "0.0.0-design",
+  "private": true,
+  "description": "DESIGN DRAFT — types only, not implemented, never published. Placeholder scope.",
+  "license": "MIT",
+  "type": "module",
+  "types": "./src/index.ts"
+}

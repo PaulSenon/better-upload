@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker.ImportScripts"],
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@bu-draft/core": ["packages/core/src/index.ts"],
+      "@bu-draft/server": ["packages/server/src/index.ts"],
+      "@bu-draft/server/node": ["packages/server/src/node.ts"],
+      "@bu-draft/s3": ["packages/s3/src/index.ts"],
+      "@bu-draft/client": ["packages/client/src/index.ts"],
+      "@bu-draft/react": ["packages/react/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/src/**/*.tsx", "examples/**/*.ts", "examples/**/*.tsx", "type-tests/**/*.ts"]
+}
