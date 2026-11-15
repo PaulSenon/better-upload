@@ -154,7 +154,8 @@ export function workerMain() {
     return btoa(s);
   };
   const crc32 = (poly: number) => {
-    const t = (cache[poly] ??= crc32Tables(poly));
+    if (!cache[poly]) cache[poly] = crc32Tables(poly);
+    const t = cache[poly];
     const [t0, t1, t2, t3, t4, t5, t6, t7] = t as [
       Uint32Array,
       Uint32Array,
