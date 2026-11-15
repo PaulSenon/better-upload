@@ -19,7 +19,10 @@ const root = new URL('..', import.meta.url).pathname;
 const out = mkdtempSync(join(tmpdir(), 'open-upload-publish-'));
 
 const packages = readdirSync(join(root, 'packages'))
-  .map((dir) => ({ dir: join(root, 'packages', dir), pkg: JSON.parse(readFileSync(join(root, 'packages', dir, 'package.json'), 'utf8')) }))
+  .map((dir) => ({
+    dir: join(root, 'packages', dir),
+    pkg: JSON.parse(readFileSync(join(root, 'packages', dir, 'package.json'), 'utf8')),
+  }))
   .filter(({ pkg }) => !pkg.private);
 
 const published = (name, version) => {
@@ -47,9 +50,13 @@ for (const { dir, pkg } of packages) {
   const tarball = readdirSync(out).find((f) => !before.has(f));
   const tag = pkg.version.includes('-') ? pkg.version.split('-')[1].split('.')[0] : 'latest';
   try {
-    execFileSync('npm', ['publish', join(out, tarball), '--access', 'public', '--tag', tag, ...(process.env.CI ? ['--provenance'] : [])], {
-      stdio: 'inherit',
-    });
+    execFileSync(
+      'npm',
+      ['publish', join(out, tarball), '--access', 'public', '--tag', tag, ...(process.env.CI ? ['--provenance'] : [])],
+      {
+        stdio: 'inherit',
+      },
+    );
     console.log(`New tag: ${id}`);
   } catch {
     failures++;
