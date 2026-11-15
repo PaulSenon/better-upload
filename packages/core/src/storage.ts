@@ -2,8 +2,10 @@ import type { PartChecksumAlgorithm } from './contract.js';
 import type { EpochMs } from './units.js';
 
 /**
- * Storage port. Implemented by `@open-upload/s3` (any S3-compatible service). Runs server-side only: it holds
- * credentials. Every method is idempotent where the provider allows it.
+ * Storage port: the only thing to implement to support a new kind of storage. `@open-upload/s3` implements it once for
+ * every S3-compatible service; anything else (Azure Blob, GCS JSON API, Bunny, a local disk for dev) is one object with
+ * the 8 required methods below, validated by `checkStorageConformance()` from `@open-upload/server/testing`.
+ * Runs server-side only: it holds credentials. Every method is idempotent where the provider allows it.
  */
 
 /** Static, per-provider facts the planner and server use. Adapters ship presets (aws, r2, minio, ...). */
@@ -120,5 +122,6 @@ export interface StorageAdapter {
   /** Optional: streams the object itself (Range pass-through). Used by `delivery: 'proxy'`. */
   getObject?(args: { key: string; versionId?: string; headers: Headers }): Promise<Response>;
 
-  deleteObject(args: { key: string; versionId?: string }): Promise<void>;
+  /** Optional: not used by the upload flow; handy for apps and tests. */
+  deleteObject?(args: { key: string; versionId?: string }): Promise<void>;
 }

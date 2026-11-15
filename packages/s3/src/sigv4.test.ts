@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { xmlBlocks, xmlUnescape, xmlValue } from './client.js';
-import { s3Storage } from './index.js';
+import { aws, cloudflareR2, minio, s3Storage } from './index.js';
 import { encodeKeyPath, presignUrl, signHeaders } from './sigv4.js';
 
 const credentials = {
@@ -44,14 +44,20 @@ describe('SigV4 (AWS documentation examples)', () => {
 
 describe('S3 adapter', () => {
   it('builds URLs for both styles', () => {
-    const aws = s3Storage({ preset: 'aws', region: 'eu-west-3', bucket: 'b', credentials });
-    expect(aws.client.url('k/x.bin').toString()).toBe('https://b.s3.eu-west-3.amazonaws.com/k/x.bin');
-    const r2 = s3Storage({ preset: 'cloudflare-r2', accountId: 'acc', bucket: 'b', credentials });
+    const s3 = s3Storage({ provider: aws({ region: 'eu-west-3' }), bucket: 'b', credentials });
+    expect(s3.client.url('k/x.bin').toString()).toBe('https://b.s3.eu-west-3.amazonaws.com/k/x.bin');
+    const r2 = s3Storage({ provider: cloudflareR2({ accountId: 'acc' }), bucket: 'b', credentials });
     expect(r2.client.url('k').toString()).toBe('https://acc.r2.cloudflarestorage.com/b/k');
-    expect(() => s3Storage({ bucket: 'b', credentials })).toThrow();
+    expect(
+      s3Storage({
+        provider: cloudflareR2({ accountId: 'acc', jurisdiction: 'eu' }),
+        bucket: 'b',
+        credentials,
+      }).client.url('k').host,
+    ).toBe('acc.eu.r2.cloudflarestorage.com');
   });
   it('signs part uploads with checksum and content-length', async () => {
-    const s = s3Storage({ preset: 'minio', endpoint: 'http://localhost:9000', bucket: 'b', credentials });
+    const s = s3Storage({ provider: minio({ endpoint: 'http://localhost:9000' }), bucket: 'b', credentials });
     const req = await s.signUploadPart({
       key: 'k',
       uploadId: 'u',

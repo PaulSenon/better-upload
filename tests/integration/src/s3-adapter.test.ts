@@ -118,7 +118,7 @@ for (const target of targets) {
       const signed = await storage.signPutObject({ key, contentLength: 3, expiresIn: 60 });
       expect((await fetch(signed.url, { method: 'PUT', headers: signed.headers, body: 'abc' })).status).toBe(200);
       expect((await storage.headObject({ key }))?.size).toBe(3);
-      await storage.deleteObject({ key });
+      await storage.deleteObject!({ key });
       expect(await storage.headObject({ key })).toBeNull();
     });
   });

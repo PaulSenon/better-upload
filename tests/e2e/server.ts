@@ -4,7 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import http from 'node:http';
-import { s3Storage } from '@open-upload/s3';
+import { minio, s3Storage } from '@open-upload/s3';
 import { createUploadServer, implement } from '@open-upload/server';
 import { toNodeHandler } from '@open-upload/server/node';
 import react from '@vitejs/plugin-react';
@@ -23,7 +23,11 @@ const credentials = {
   secretAccessKey: process.env.MINIO_PASSWORD ?? 'minioadmin',
 };
 // The browser (and the server) talk to the storage through the proxy.
-const storage = s3Storage({ preset: 'minio', endpoint: `http://localhost:${PROXY_PORT}`, bucket: BUCKET, credentials });
+const storage = s3Storage({
+  provider: minio({ endpoint: `http://localhost:${PROXY_PORT}` }),
+  bucket: BUCKET,
+  credentials,
+});
 await storage.client.request({ method: 'PUT', allow: [409] });
 
 const t = implement(contract);

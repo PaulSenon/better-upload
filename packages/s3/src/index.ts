@@ -10,81 +10,17 @@ import {
 import { type CredentialsProvider, S3Client, xmlBlocks, xmlEscape, xmlValue } from './client.js';
 
 export { type CredentialsProvider, S3Client, type S3ClientOptions, type S3Credentials } from './client.js';
+export * from './providers.js';
 export { presignUrl, signHeaders } from './sigv4.js';
 
-const MiB = 1024 ** 2;
-const GiB = 1024 ** 3;
-const TiB = 1024 ** 4;
-const DAY = 86_400_000;
-
-/** Provider presets: capabilities and URL conventions. Sources are in docs/research/storage-and-browser.md. */
-export type S3Preset = 'aws' | 'cloudflare-r2' | 'minio' | 'backblaze-b2' | 'generic';
-
-const BASE: StorageCapabilities = {
-  maxParts: 10_000,
-  minPartSize: 5 * MiB,
-  maxPartSize: 5 * GiB,
-  maxObjectSize: 5 * TiB,
-  maxSinglePutSize: 5 * GiB,
-  maxPresignExpiry: 7 * 86_400,
-  checksums: [],
-  incompleteUploadExpiry: null,
-  conditionalWrites: false,
-};
-
-export const PRESETS: Readonly<Record<S3Preset, { capabilities: StorageCapabilities; forcePathStyle: boolean }>> = {
-  aws: {
-    forcePathStyle: false,
-    capabilities: {
-      ...BASE,
-      maxObjectSize: 50 * TiB,
-      checksums: ['crc32c', 'crc32', 'sha256', 'sha1'],
-      conditionalWrites: true,
-    },
-  },
-  'cloudflare-r2': {
-    forcePathStyle: true,
-    capabilities: {
-      ...BASE,
-      maxObjectSize: 4.995 * TiB,
-      checksums: ['crc32c', 'crc32', 'sha256', 'sha1'],
-      incompleteUploadExpiry: 7 * DAY,
-      conditionalWrites: true,
-    },
-  },
-  minio: {
-    forcePathStyle: true,
-    capabilities: {
-      ...BASE,
-      maxObjectSize: 50 * TiB,
-      checksums: ['crc32c', 'crc32', 'sha256', 'sha1'],
-      incompleteUploadExpiry: 1 * DAY,
-      conditionalWrites: true,
-    },
-  },
-  'backblaze-b2': {
-    forcePathStyle: false,
-    capabilities: { ...BASE, maxObjectSize: 10 * TiB, checksums: [] },
-  },
-  generic: { forcePathStyle: true, capabilities: BASE },
-};
+import { S3_DEFAULT_CAPABILITIES, type S3Provider } from './providers.js';
 
 export interface S3StorageOptions {
+  /** Where the S3 API lives and what it supports: `aws({ region })`, `cloudflareR2({ accountId })`, `minio({ endpoint })`, `s3Compatible({ endpoint })`. */
+  readonly provider: S3Provider;
   readonly bucket: string;
   readonly credentials: CredentialsProvider;
-  /** Fills capabilities and URL style. Default `'generic'` (conservative: no checksums). */
-  readonly preset?: S3Preset;
-  /** Default `'us-east-1'` (`'auto'` for R2). */
-  readonly region?: string;
-  /**
-   * Storage endpoint. Defaults: AWS `https://s3.{region}.amazonaws.com`; R2 `https://{accountId}.r2.cloudflarestorage.com`.
-   * Required for MinIO and generic providers.
-   */
-  readonly endpoint?: string;
-  /** Cloudflare R2 account id (builds the endpoint). */
-  readonly accountId?: string;
-  readonly forcePathStyle?: boolean;
-  /** Override detected capabilities (e.g. a MinIO with a custom stale-upload expiry). */
+  /** Override provider capabilities (e.g. a MinIO with a custom stale-upload expiry). */
   readonly capabilities?: Partial<StorageCapabilities>;
   /** Prefix prepended to every key (defence in depth: the server can never write outside it). */
   readonly keyPrefix?: string;
@@ -93,27 +29,22 @@ export interface S3StorageOptions {
   readonly fetch?: typeof fetch;
 }
 
-/** S3-compatible {@link StorageAdapter}. */
+/** S3-compatible {@link StorageAdapter}: one implementation for every provider speaking the S3 API. */
 export function s3Storage(options: S3StorageOptions): StorageAdapter & { readonly client: S3Client } {
-  const preset = PRESETS[options.preset ?? 'generic'];
-  const region = options.region ?? (options.preset === 'cloudflare-r2' ? 'auto' : 'us-east-1');
-  const endpoint =
-    options.endpoint ??
-    (options.preset === 'aws'
-      ? `https://s3.${region}.amazonaws.com`
-      : options.preset === 'cloudflare-r2' && options.accountId
-        ? `https://${options.accountId}.r2.cloudflarestorage.com`
-        : undefined);
-  if (!endpoint) throw new TypeError(`s3Storage: "endpoint" is required for preset "${options.preset ?? 'generic'}"`);
+  const { provider } = options;
   const client = new S3Client({
-    endpoint,
-    region,
+    endpoint: provider.endpoint,
+    region: provider.region,
     bucket: options.bucket,
     credentials: options.credentials,
-    forcePathStyle: options.forcePathStyle ?? preset.forcePathStyle,
+    forcePathStyle: provider.forcePathStyle,
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
-  const capabilities: StorageCapabilities = { ...preset.capabilities, ...options.capabilities };
+  const capabilities: StorageCapabilities = {
+    ...S3_DEFAULT_CAPABILITIES,
+    ...provider.capabilities,
+    ...options.capabilities,
+  };
   const prefix = options.keyPrefix ?? '';
   const fullKey = (key: string) => `${prefix}${key}`;
   const signLength = options.signContentLength ?? true;
@@ -125,7 +56,7 @@ export function s3Storage(options: S3StorageOptions): StorageAdapter & { readonl
   };
 
   return {
-    name: `s3:${options.preset ?? 'generic'}`,
+    name: `s3:${provider.name}`,
     capabilities,
     client,
 

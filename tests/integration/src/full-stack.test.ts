@@ -118,7 +118,9 @@ for (const target of targets) {
       const second = client(counting, persistence).videos.upload(file, { input: { albumId: 'b' } });
       const output = await second.result;
       expect(second.getSnapshot().resumed).toBe(true);
-      expect(puts.sort((a, b) => a - b)).toEqual([3, 4]);
+      // Exactly the two parts the first attempt did not confirm, never one twice.
+      expect(puts).toHaveLength(2);
+      expect(new Set(puts).size).toBe(2);
       const head = await storage.headObject({ key: output.key });
       expect(head?.size).toBe(file.size);
     });

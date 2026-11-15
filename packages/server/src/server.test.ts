@@ -254,3 +254,12 @@ describe('upload server', () => {
     noOutput.a.handler({ onUploadRequested: () => ({ key: 'k' }) });
   });
 });
+
+describe('storage conformance kit', () => {
+  it('the in-memory storage passes every check', async () => {
+    const storage = memoryStorage();
+    const results = await (await import('./testing.js')).checkStorageConformance(storage, { fetch: storage.fetch });
+    for (const r of results) expect(r.ok, `${r.name}: ${r.error}`).toBe(true);
+    expect(results.length).toBeGreaterThanOrEqual(8);
+  });
+});

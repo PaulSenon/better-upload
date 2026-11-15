@@ -1,4 +1,4 @@
-import { type S3Preset, s3Storage } from '@open-upload/s3';
+import { aws, cloudflareR2, minio, s3Storage } from '@open-upload/s3';
 
 /**
  * Storage targets. MinIO (docker compose) is always on; real providers run only when their credentials are set:
@@ -7,7 +7,6 @@ import { type S3Preset, s3Storage } from '@open-upload/s3';
  */
 export interface Target {
   readonly name: string;
-  readonly preset: S3Preset;
   readonly create: (prefix: string) => ReturnType<typeof s3Storage>;
   readonly setup?: () => Promise<void>;
 }
@@ -19,11 +18,9 @@ export const MINIO_BUCKET = 'uploads-test';
 export const targets: Target[] = [
   {
     name: 'minio',
-    preset: 'minio',
     create: (prefix) =>
       s3Storage({
-        preset: 'minio',
-        endpoint: MINIO_ENDPOINT,
+        provider: minio({ endpoint: MINIO_ENDPOINT }),
         bucket: MINIO_BUCKET,
         keyPrefix: prefix,
         credentials: {
@@ -33,8 +30,7 @@ export const targets: Target[] = [
       }),
     setup: async () => {
       const s = s3Storage({
-        preset: 'minio',
-        endpoint: MINIO_ENDPOINT,
+        provider: minio({ endpoint: MINIO_ENDPOINT }),
         bucket: MINIO_BUCKET,
         credentials: {
           accessKeyId: env.MINIO_USER ?? 'minioadmin',
@@ -49,11 +45,9 @@ export const targets: Target[] = [
 if (env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET) {
   targets.push({
     name: 'cloudflare-r2',
-    preset: 'cloudflare-r2',
     create: (prefix) =>
       s3Storage({
-        preset: 'cloudflare-r2',
-        accountId: env.R2_ACCOUNT_ID!,
+        provider: cloudflareR2({ accountId: env.R2_ACCOUNT_ID! }),
         bucket: env.R2_BUCKET!,
         keyPrefix: prefix,
         credentials: { accessKeyId: env.R2_ACCESS_KEY_ID!, secretAccessKey: env.R2_SECRET_ACCESS_KEY! },
@@ -63,11 +57,9 @@ if (env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env
 if (env.AWS_REGION && env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY && env.AWS_BUCKET) {
   targets.push({
     name: 'aws',
-    preset: 'aws',
     create: (prefix) =>
       s3Storage({
-        preset: 'aws',
-        region: env.AWS_REGION!,
+        provider: aws({ region: env.AWS_REGION! }),
         bucket: env.AWS_BUCKET!,
         keyPrefix: prefix,
         credentials: {

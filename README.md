@@ -26,7 +26,7 @@ export const contract = uc.router({
 // server
 const t = implement(contract).$context<{ user: User }>();
 export const uploads = createUploadServer({
-  storage: s3Storage({ preset: 'cloudflare-r2', accountId, bucket: 'media', credentials }),
+  storage: s3Storage({ provider: cloudflareR2({ accountId }), bucket: 'media', credentials }),
   secret: process.env.UPLOAD_SECRET!,
   router: t.router({
     videos: t.videos.handler({
@@ -48,7 +48,7 @@ const { mediaId } = await task.result;
 | Package | |
 |---|---|
 | [`@open-upload/core`](./packages/core) | Contract builder, errors, file rules, part planning, checksums. Zero dependencies. |
-| [`@open-upload/s3`](./packages/s3) | S3-compatible adapter with presets; minimal SigV4 on Web Crypto (no AWS SDK). |
+| [`@open-upload/s3`](./packages/s3) | One S3 adapter for every S3-compatible provider (providers are data); minimal SigV4 on Web Crypto (no AWS SDK). |
 | [`@open-upload/server`](./packages/server) | Typed hooks, sealed tickets and receipts, Fetch handler, Node adapter. |
 | [`@open-upload/client`](./packages/client) | The upload engine and the typed client. |
 | [`@open-upload/react`](./packages/react) | `useUpload`, `useUploadTask`, `usePendingUploads`. |
