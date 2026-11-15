@@ -112,7 +112,7 @@ uploads.registerRoutes(http, { pathPrefix: '/api/upload/' });   // init/sign/sta
 export const myPending = query({ handler: (ctx) => uploads.listPending(ctx, { owner: '…' }) });
 ```
 
-**Component tables (★ on by default; D-032 open point):**
+**Component tables (like ConvexFS):**
 - `uploads`: `sessionId`, `endpoint`, `owner`, sealed `ticket`, file descriptor, `status`
   (`pending | completed | aborted | expired`), `expiresAt`.
   - Written only at init, complete and abort: never per part, so writes stay cheap.
@@ -134,8 +134,10 @@ export const myPending = query({ handler: (ctx) => uploads.listPending(ctx, { ow
 | Downloads | 302 to a 1 h signed CDN URL | stable link → 302 to a fresh presigned URL; Cloudflare proxy optional |
 | GC | soft delete, ref-counted blobs, cron | app cron → `uploads.sweep(ctx)` action (abort expired multipart, optional orphan delete). Ref-counted dedup out of scope for v0 |
 
+Inspiration to study before implementing: ConvexFS, the Better Auth component, the Stripe component, `@convex-dev/r2`
+and other well-made components (table layout, `registerRoutes`, client class wrapping `components.x`, testing).
+
 Open points:
-- Component tables on by default, or opt-in?
 - Is ConvexFS-style path/ref-count file management in scope (later)?
 - Can components register crons **[unverified]**, or does the sweep stay app-side?
 
@@ -155,7 +157,6 @@ Open points:
 ## Open questions
 
 - **I1.** Which mode should the docs lead with: inline `onComplete`, or receipt/commit? Proposal: inline for apps; receipt for the Payload page.
-- **I2.** First official integration after v0? Proposal (revised): **Convex component first**, since Payload is getting native
-  resumable sessions in v4. Payload gets a docs page in v0.
+- ~~I2~~ **Resolved (round 3):** Convex component first, Payload docs page.
 - ~~I3. Payload admin UI takeover~~: dropped, see D-033.
-- **I4.** Convex component: tables on by default (★) or opt-in?
+- ~~I4~~ **Resolved (round 3):** follow ConvexFS, i.e. the component has its own tables.

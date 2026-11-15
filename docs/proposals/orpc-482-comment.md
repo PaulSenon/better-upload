@@ -1,6 +1,6 @@
 # Proposal: contributing to oRPC issue #482 (direct-to-bucket resumable uploads)
 
-> Status: DRAFT, not posted. Owner must approve before posting.
+> Status: DRAFT, not posted. **Only the owner posts** (round 3); Claude never posts upstream.
 
 Checked 2026-11-15 against `middleapi/orpc` on GitHub and the published `.d.ts` of `@orpc/{server,contract,client}@2.0.0-beta.50`.
 Background: [`../research/orpc-extension.md`](../research/orpc-extension.md). Priority: low.

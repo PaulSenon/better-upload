@@ -134,3 +134,17 @@
 | H2 | Convex: ship a **Convex component** like ConvexFS, but **multi-provider** (not tied to Bunny.net), with multipart upload and resilience. |
 | R2 | Side quest (low priority): find the right way to contribute to oRPC for this use case; at least move the debate forward (#482). |
 | N1 | Name search: welcome, not critical. Wants a clear picture of what the existing Better Upload is and whether its approach differs, without cluttering the main thread. |
+
+## Addendum — owner feedback round 3 (2026-11-15, verbatim)
+
+> Ne poste surtout rien sur ORPC, c'est moi qui ferai s'il y a besoin.
+> Ok pour intégrer le composant Convex avant payload. Et j'ai pas compris ta question sur le composant Convex. De toute façon, on veut juste faire quasiment comme Convex FS pour regarder comment ça marche, comment créer des composants custom. Il y en a plein qui existent pour Better Auth, pour Stra, et pour plein de trucs qui sont bien faits. On a plein de sources d'inspiration.
+> Pour le nom, tout ce que t'as trouvé, c'est de la merde. Je pense qu'on va juste l'appeler quelque chose upload. Et avec un genre un peu comme Théo qui préfixe tout avec T3, là je pourrais préfixer avec un truc à moi. Donc soit avec mon nom de famille, ce nom, soit un petit diminutif sympa que je peux commencer à utiliser partout.
+
+### New / revised requirements (round 3)
+
+| ID | Requirement |
+|---|---|
+| R3 | **Never post anything upstream** (oRPC or elsewhere). The owner posts himself if needed; drafts only. |
+| H2′ | Convex component first, before Payload. Model it closely on ConvexFS and well-made existing components (Better Auth, Stripe, …); it is also a way to learn how custom components work. |
+| N2 | Name = "<owner prefix> upload", T3-style personal prefix (surname or a short nickname the owner can reuse everywhere). Generic shortlist rejected. |
