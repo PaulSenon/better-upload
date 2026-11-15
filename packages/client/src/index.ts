@@ -61,6 +61,11 @@ export interface UploadEndpointClient<C extends UploadContract<any>> {
   uploadMany(files: readonly UploadableFile[], options: UploadOptions<C>): readonly EndpointUploadTask<C>[];
   /** Persisted, unfinished uploads of this endpoint (status `needs-file` until a file is attached). */
   pending(): Promise<readonly EndpointUploadTask<C>[]>;
+  /**
+   * Resume from a ticket the host app stored itself (e.g. in its DB via the server `onInit` hook):
+   * another device, or after browser storage was evicted. Same identity checks as a local resume.
+   */
+  resume(file: UploadableFile, options: { readonly ticket: string; readonly signal?: AbortSignal }): EndpointUploadTask<C>;
   /** Client-side pre-validation using the contract rules (only when the contract *value* was given). */
   validate(file: UploadableFile): readonly EndpointError<DefOf<C>['errors']>[];
   /** Present when the contract value (not only its type) was passed to `createUploadClient`. */
@@ -69,13 +74,21 @@ export interface UploadEndpointClient<C extends UploadContract<any>> {
 
 export type DownloadOptions<C extends DownloadContract<any>> = InputArg<InferDownloadInput<C>> & {
   readonly signal?: AbortSignal;
-  /** Where to write bytes. Default: let the browser download manager handle it (`'native'`). */
-  readonly sink?: DownloadSink | 'native';
+  /**
+   * Where to write bytes. `'auto'` picks by capability: File System Access (Chromium) → OPFS + export
+   * (Safari/Firefox; temporarily doubles disk use) → service-worker stream (not resumable) → memory (small files).
+   */
+  readonly sink?: DownloadSink | 'auto';
   readonly chunkSize?: number;
 };
 
 export interface DownloadEndpointClient<C extends DownloadContract<any>> {
-  /** Just resolve a signed URL (e.g. for `<a href>`, `<video src>`). */
+  /**
+   * Stable, per-user link for the browser's native download manager (no network call: built from the
+   * contract path + input). Retrying in the browser re-hits the server, which re-authorizes and re-signs.
+   */
+  link(options: InputArg<InferDownloadInput<C>>): string;
+  /** Resolve the link target now (presigned request + object info), e.g. for `<video src>`. */
   url(options: InputArg<InferDownloadInput<C>>): Promise<DownloadResponse>;
   /** Managed, resumable ranged download into a sink. */
   download(options: DownloadOptions<C>): DownloadTask<EndpointError<DefOf<C>['errors']>>;

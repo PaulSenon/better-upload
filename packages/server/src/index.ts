@@ -24,6 +24,7 @@ import type {
   UploadContract,
   UploadErrorShape,
   EpochMs,
+  RouterPaths,
 } from '@bu-draft/core';
 
 // ---------------------------------------------------------------------------
@@ -65,7 +66,7 @@ export interface UploadSession<TMeta = unknown> {
   readonly uploadId?: string;
   readonly file: FileDescriptor;
   readonly plan: PartPlan;
-  /** Server-only data returned by `authorize`, carried inside the signed token (keep it small) or the SessionStore. */
+  /** Server-only data returned by `authorize`, carried inside the sealed session ticket (keep it small). */
   readonly meta: TMeta;
   readonly createdAt: EpochMs;
   readonly expiresAt: EpochMs;
@@ -79,7 +80,7 @@ export interface UploadHooks<C extends UploadContract<any>, TCtx extends object,
   /**
    * Runs on `init` (once per batch), after input/file-rule validation. Authorize and return
    * server-only metadata attached to every session of the batch. Throw via `errors` to reject.
-   * On every later op (sign/status/complete/abort) the session token is verified instead;
+   * On every later op (sign/status/complete/abort) the session ticket is verified instead;
    * use `reauthorize` to re-check permissions on those ops.
    */
   authorize(args: {
@@ -89,7 +90,7 @@ export interface UploadHooks<C extends UploadContract<any>, TCtx extends object,
     readonly errors: ErrorFactory<DefOf<C>['errors']>;
   }): TMeta | Promise<TMeta>;
 
-  /** Re-check permissions on later ops (e.g. user still exists, quota). Default: token validity only. */
+  /** Re-check permissions on later ops (e.g. user still exists, quota). Default: ticket validity only. */
   reauthorize?(args: {
     readonly context: TCtx & BaseContext;
     readonly session: UploadSession<TMeta>;
@@ -122,6 +123,17 @@ export interface UploadHooks<C extends UploadContract<any>, TCtx extends object,
     readonly errors: ErrorFactory<DefOf<C>['errors']>;
   }): InferUploadOutput<C> | Promise<InferUploadOutput<C>>;
 
+  /**
+   * Optional. Called once per created session, right after `CreateMultipartUpload`.
+   * Typical use: insert a "pending upload" row in the host DB (CMS document in draft state, Convex
+   * table, ...) storing `ticket`, to offer resume later or garbage-collect. Not required for resume
+   * on the same browser.
+   */
+  onInit?(args: {
+    readonly context: TCtx & BaseContext;
+    readonly input: InferUploadParsedInput<C>;
+  } & UploadTicketInfo<TMeta>): void | Promise<void>;
+
   onAbort?(args: { readonly session: UploadSession<TMeta>; readonly reason: 'client' | 'expired' | 'janitor' }): void | Promise<void>;
 }
 
@@ -141,7 +153,20 @@ export interface DownloadTarget {
   readonly versionId?: string;
   readonly fileName?: string;
   readonly disposition?: 'attachment' | 'inline';
+  /**
+   * Validity of the presigned URL behind the link. For native downloads, size it to the expected
+   * download time: Chromium resumes against the *final* (presigned) URL, so resume works only until it expires.
+   * Capped by provider (7 d) and by temporary-credential expiry.
+   */
   readonly expiresIn?: Duration;
+  /**
+   * How the stable link delivers bytes:
+   *  - `'redirect'` (default): `GET` link → 302 → fresh presigned URL. Zero compute; retry always works,
+   *    resume works until `expiresIn`.
+   *  - `'proxy'`: the link streams the bytes itself (Range / If-Range pass-through). Resume works in every
+   *    browser download manager. Meant for edge runtimes next to the bucket (e.g. Worker + R2: no egress).
+   */
+  readonly delivery?: 'redirect' | 'proxy';
 }
 
 // ---------------------------------------------------------------------------
@@ -204,29 +229,42 @@ export type RootImplementer<T extends ContractRouter, TCtx extends object> = Imp
 export declare function implement<T extends ContractRouter>(contract: T): RootImplementer<T, {}>;
 
 // ---------------------------------------------------------------------------
-// Server-side state (optional)
+// Server-side state: none. The session ticket is portable.
 // ---------------------------------------------------------------------------
 
 /**
- * Optional. Default mode is *stateless*: session data is carried in a signed (HMAC) token,
- * and the storage (ListParts / HeadObject) is the source of truth for progress.
- * Provide a SessionStore when you need: revocation, cross-device resume, resume after the
- * client lost its local state, quotas across sessions, exactly-once completion bookkeeping,
- * or an admin view of in-progress uploads.
+ * The SDK keeps NO server-side state and ships NO database adapter (owner decision, Q2).
+ * Everything the server must remember between `init` and `complete` (key, uploadId, part plan,
+ * authorize() meta, expiry) is sealed into an opaque *session ticket* minted by the server.
+ *
+ * The ticket is portable: if the host app wants cross-device resume, resume after the browser lost
+ * its local state, or an admin list of in-progress uploads, it stores the ticket (a string) in its
+ * own DB from `onInit`, and later passes it back to the client (`endpoint.resume(file, { ticket })`).
+ * The SDK never needs to know where it was stored.
  */
-export interface SessionStore {
-  get(id: string): Promise<UploadSession | undefined>;
-  put(session: UploadSession, ttlMs: number): Promise<void>;
-  delete(id: string): Promise<void>;
-  /** Lookup used by `init` with `resume.byFingerprint`. Scoped by an owner chosen in `authorize`. */
-  findByFingerprint?(args: { endpoint: string; owner: string; fingerprint: string }): Promise<UploadSession | undefined>;
-  /** Mark completion atomically; returns false if it was already marked. */
-  markCompleted?(id: string): Promise<boolean>;
+/**
+ * Completion receipt: sealed proof, minted by `complete`, that an object exists in storage for a given
+ * endpoint/session/meta. Lets a host create its DB record in a *separate* request (Payload form submit,
+ * Convex commit mutation, ...) and verify it with `server.verifyReceipt()` instead of trusting client claims.
+ */
+export interface UploadReceipt<TMeta = unknown> {
+  readonly endpoint: string;
+  readonly sessionId: string;
+  readonly object: StoredObject;
+  readonly file: FileDescriptor;
+  readonly meta: TMeta;
+  readonly issuedAt: EpochMs;
+  readonly expiresAt: EpochMs;
+}
+
+export interface UploadTicketInfo<TMeta = unknown> {
+  readonly ticket: string;
+  readonly session: UploadSession<TMeta>;
 }
 
 export interface TokenSigner {
   sign(payload: Uint8Array): Promise<string>;
-  verify(token: string): Promise<Uint8Array | null>;
+  verify(ticket: string): Promise<Uint8Array | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,11 +275,10 @@ export interface UploadServerOptions<T extends ContractRouter, TCtx extends obje
   readonly router: ImplementedRouter<T, TCtx>;
   readonly storage: StorageAdapter;
   /**
-   * Secret used to sign session tokens (≥ 32 random bytes). Rotatable: pass an array, first signs, all verify.
+   * Secret used to sign session tickets (≥ 32 random bytes). Rotatable: pass an array, first signs, all verify.
    * Not a storage credential.
    */
   readonly secret: string | readonly string[] | TokenSigner;
-  readonly sessions?: SessionStore;
   /** Must match the client `baseUrl` path. Default `/api/upload`. */
   readonly basePath?: string;
   /** Presigned URL validity per batch. Default 15 min; capped by `storage.capabilities.maxPresignExpiry`. */
@@ -256,6 +293,8 @@ export interface UploadServerOptions<T extends ContractRouter, TCtx extends obje
 export interface UploadServer<T extends ContractRouter, TCtx extends object> {
   /** Fetch-standard handler. Works as-is on Bun, Deno, Cloudflare Workers, Hono, Next route handlers. */
   fetch(request: Request, context: TCtx): Promise<Response>;
+  /** Verify a receipt returned to the client by `complete`. `null` if forged, expired or for another endpoint. */
+  verifyReceipt<P extends RouterPaths<T>>(receipt: string, options?: { endpoint?: P }): Promise<UploadReceipt | null>;
   /** Startup self-check: CORS, lifecycle rule vs resume TTL, credentials expiry vs URL TTL. */
   check(): Promise<readonly { level: 'ok' | 'warn' | 'error'; message: string }[]>;
   readonly '~contract': T;

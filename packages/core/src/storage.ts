@@ -127,5 +127,7 @@ export interface StorageAdapter {
     responseContentDisposition?: string;
     responseContentType?: string;
   }): Promise<SignedRequest>;
+  /** Optional: needed for `delivery: 'proxy'` (Range pass-through). */
+  getObject?(args: { key: string; versionId?: string; range?: string; ifRange?: string; ifMatch?: string }): Promise<Response>;
   deleteObject(args: { key: string; versionId?: string }): Promise<void>;
 }

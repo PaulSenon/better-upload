@@ -87,3 +87,30 @@
 | ID | Requirement |
 |---|---|
 | C1 | Opus coordinates and arbitrates; may delegate research/review. |
+
+## Addendum — owner feedback round 1 (2026-11-15, verbatim)
+
+> side track question tu run in subagent: if we almost reuse 1:1 the orpc api, shoul/can it be an "extension/plugin" of orpc (v2) ? (genuine naive question)
+>
+> Q1: j'aime better-upload, mais si déjà un gros player existant, on trouvera autre chose.
+> Q2: je pense si le client a perdu l'état c'est mort ? parce que je veux pas qu'on apporte de DB ou autre. peut-être juste l'app qui utilise notre lib va avoir enregistré en db le fait qu'un upload est en cours , et on peut éventuellement avoir une api qui lui permettrait sur un nouvel upload d'avoir sa logique pour en resume un ? sans que ça fasse parti de notre sdk
+> Q3: j'aime bien la façon orpc
+> Q4: la tu m'a perdu. je comprends pas pourquoi on a besoin de token in the first place
+> Q5: je sais pas de quoi on parle
+> Q6: pareil la j'ai du mal à capter de quoi on parle et des implications.
+> Q7: je comprends pas de quoi on parle
+> Q8: je sais pas de quoi on parle. niveau UX il faut qu'un download soit un lien unique pré signé pour un user et qu'il soit si possible retryabale si failure et que le user juste "retry" dans son navigateur. Je sais pas si on permet le download natif et UX simple ou si besoin d'avoir un download custom/resumable qui trigger le download natif à la fin du download local custom pour save sur la machine. (je crois c'est ce que font la plupart des web apps type drive de fichiers pour download. Mais je pense qu'on a des limites de taille pour buffer avant décrire dans un fichier sur l'os. donc je sais pas quel est le mieux. N'hésite pas à innover et boil the ocean pour trouver la meilleure solution perf/ux/cout/resilience
+> Q9: on verra plus tard I guess.
+>
+> La premier shape api dans le readme est pas mal a priori meme si on fige rien pour le moment
+>
+> j'aimerais aussi avoir une api qui permet vraiment de se plug à des cms existant genre payloadcms, ou l'auth est qq part, le storage des fichiers ailleurs, la génération des id et liens dans la db cms encore ailleurs. il faut que ça soit smooth et on donnera meme des adapteurs/plugins/components pour les gros cms et ptetre aussi genre pour Convex (d'ailleurs je pense que ça vaut le coup de voir les partis pris de convex quand le cto a contribué un component pour host des fichier distant sur je sais plus quel service de cdn/hosting moins cher. )
+
+### New / revised requirements
+
+| ID | Requirement |
+|---|---|
+| G4′ | **No DB in the SDK.** If the browser lost its state and the host app kept nothing, the upload is lost. The host app may persist in-progress uploads itself; the SDK exposes what it needs to resume from that, without owning storage. |
+| G5 | Smooth integration with host systems (e.g. Payload CMS, Convex) where auth, file storage, and ID/link generation + DB records live in different places. Official adapters/plugins/components for major CMSes / Convex later. |
+| D3 | Download UX: one presigned link per user, retryable on failure by just "retry" in the browser; find the best perf/UX/cost/resilience trade-off (native vs managed download). |
+| R1 | Side research: could the SDK be an oRPC v2 extension/plugin? |

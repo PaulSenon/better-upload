@@ -36,3 +36,9 @@ void client.media.download.url({ input: { mediaId: 'm1' } });
 client.media.download.upload;
 // @ts-expect-error upload endpoints have no `url`
 client.avatar.url;
+
+// Native download link: synchronous, typed input.
+const href: string = client.media.download.link({ input: { mediaId: 'm1' } });
+void href;
+// @ts-expect-error input required
+client.media.download.link({});

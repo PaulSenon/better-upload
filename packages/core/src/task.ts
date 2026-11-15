@@ -58,6 +58,8 @@ export interface UploadSnapshot<TOutput = unknown, TError extends UploadErrorSha
   readonly nextRetryAt?: EpochMs;
   readonly error?: TError;
   readonly output?: TOutput;
+  /** Sealed completion receipt, present once `completed`. Forward it to a host "commit" endpoint if you create records separately. */
+  readonly receipt?: string;
   readonly createdAt: EpochMs;
   readonly updatedAt: EpochMs;
   readonly sessionExpiresAt?: EpochMs;
@@ -72,6 +74,8 @@ export interface ReadableStore<T> {
 export interface UploadTask<TOutput = unknown, TError extends UploadErrorShape = BuiltinError>
   extends ReadableStore<UploadSnapshot<TOutput, TError>> {
   readonly id: string;
+  /** Portable, opaque session ticket (undefined until `init` returned). The host app may store it to resume elsewhere. */
+  readonly ticket: string | undefined;
   pause(): void;
   resume(): void;
   /** Re-run after a retryable failure (resets the retry budget). */
@@ -94,7 +98,7 @@ export interface PersistedUpload {
   readonly endpoint: string;
   readonly baseUrl: string;
   readonly file: FileDescriptor;
-  readonly token: string;
+  readonly ticket: string;
   readonly plan: PartPlan;
   readonly confirmedParts: readonly { partNumber: number; size: number; checksum?: string }[];
   /** Serialized incremental hash state when `contentHash` is enabled. */

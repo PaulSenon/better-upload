@@ -16,6 +16,14 @@ import type { UploadErrorShape } from './errors.js';
  */
 
 export type ProtocolOp = 'init' | 'sign' | 'status' | 'complete' | 'abort' | 'download';
+
+/**
+ * Download links are plain GETs so the browser's native download manager can use them:
+ *   GET {baseUrl}/{endpointPath}?{input as query}          (authenticated by the app's cookie/session)
+ *   GET {baseUrl}/{endpointPath}/l/{linkTicket}             (sealed, expiring, for links shared without a session)
+ * Both re-run `resolve` (authorization) on every hit, then redirect or proxy.
+ */
+export type DownloadLinkKind = 'session' | 'sealed';
 export const PROTOCOL_VERSION = 1 as const;
 
 /** What the client tells the server about a file. Never the content. */
@@ -47,13 +55,13 @@ export interface InitRequest<TInput = unknown> {
   readonly input: TInput;
   readonly files: readonly FileDescriptor[];
   /** Ask the server to look for an existing resumable session for these files. */
-  readonly resume?: { readonly tokens?: readonly string[]; readonly byFingerprint?: boolean };
+  readonly resume?: { readonly tickets?: readonly string[]; readonly byFingerprint?: boolean };
 }
 
 export interface InitSession {
   readonly sessionId: string;
-  /** Signed, opaque session token (or reference when a SessionStore is used). Contains no secret. */
-  readonly token: string;
+  /** Signed, opaque session ticket. Contains no secret. */
+  readonly ticket: string;
   readonly plan: PartPlan;
   readonly expiresAt: EpochMs;
   /** Parts the storage already holds (non-empty when an existing session is resumed). */
@@ -70,7 +78,7 @@ export interface InitResponse {
 // --- sign ------------------------------------------------------------------
 
 export interface SignRequest {
-  readonly token: string;
+  readonly ticket: string;
   readonly parts: readonly { readonly partNumber: number; readonly checksum?: string }[];
 }
 export interface SignedPart {
@@ -81,7 +89,7 @@ export interface SignResponse {
   readonly parts: readonly SignedPart[];
 }
 
-// --- status (reconciliation; also refreshes the session token) -----------
+// --- status (reconciliation; also refreshes the session ticket) -----------
 
 export interface WirePart {
   readonly partNumber: number;
@@ -89,20 +97,20 @@ export interface WirePart {
   readonly checksum?: string;
 }
 export interface StatusRequest {
-  readonly token: string;
+  readonly ticket: string;
 }
 export interface StatusResponse {
   readonly state: 'uploading' | 'completed' | 'aborted' | 'expired';
   readonly uploadedParts: readonly WirePart[];
-  /** Sliding renewal: the server may hand back a token with a later expiry. */
-  readonly token: string;
+  /** Sliding renewal: the server may hand back a ticket with a later expiry. */
+  readonly ticket: string;
   readonly expiresAt: EpochMs;
 }
 
 // --- complete --------------------------------------------------------------
 
 export interface CompleteRequest {
-  readonly token: string;
+  readonly ticket: string;
   /**
    * Optional ETags read by the client (needs CORS `ExposeHeaders: ETag`). The server always
    * re-lists parts from storage, checks part count, per-part size against the plan (guards against
@@ -115,6 +123,8 @@ export interface CompleteRequest {
 }
 export interface CompleteResponse<TOutput = unknown> {
   readonly output: TOutput;
+  /** Sealed completion receipt (see server `verifyReceipt`). Opaque to the client; forward it to the host. */
+  readonly receipt: string;
   /** True when this call found the upload already completed (idempotent retry). */
   readonly alreadyCompleted: boolean;
 }
@@ -122,7 +132,7 @@ export interface CompleteResponse<TOutput = unknown> {
 // --- abort -----------------------------------------------------------------
 
 export interface AbortRequest {
-  readonly token: string;
+  readonly ticket: string;
 }
 
 // --- download --------------------------------------------------------------
@@ -131,6 +141,9 @@ export interface DownloadRequest<TInput = unknown> {
   readonly input: TInput;
 }
 export interface DownloadResponse {
+  /** Stable link for `<a href download>`; per-user, re-authorized on every hit. Prefer this for native downloads. */
+  readonly link: string;
+  /** Direct presigned request (managed downloads, `<video src>`). Short-lived. */
   readonly request: SignedRequest;
   readonly object: {
     readonly size: number;

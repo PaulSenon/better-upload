@@ -25,7 +25,7 @@
  Browser                                  Your server                         Your bucket
  ───────                                  ───────────                         ───────────
  client (derived from contract) ──init──► router (implements contract) ──► CreateMultipartUpload
-          ◄── session token + plan ───────                         
+          ◄── session ticket + plan ───────                         
           ──sign(parts)──────────────────► presign UploadPart (short TTL)
           ─────────── PUT part (presigned, checksum signed) ────────────────► stores part
           ──status───────────────────────► ListParts (source of truth)
@@ -134,7 +134,7 @@ const router = t.router({
 export const uploads = createUploadServer({
   router,
   storage,
-  secret: process.env.UPLOAD_TOKEN_SECRET!,  // signs session tokens; not a bucket credential
+  secret: process.env.UPLOAD_TOKEN_SECRET!,  // seals session tickets; not a bucket credential
   basePath: '/api/upload',
 });
 ```
@@ -194,7 +194,7 @@ pre-validation; either is safe. Nested objects namespace endpoints, so `media.do
 |---|---|---|
 | `use(middleware)` | Every op | Extends the typed context (auth, rate limit, logging) |
 | `authorize` | `init`, once per batch | Return server-only `meta`, or throw with `errors(...)` |
-| `reauthorize` | `sign`, `status`, `complete`, `abort` | Optional. By default a valid session token is enough. |
+| `reauthorize` | `sign`, `status`, `complete`, `abort` | Optional. By default a valid session ticket is enough. |
 | `key` | `init` | Object key. Never derive it from `file.name`. |
 | `onComplete` | `complete` | **At-least-once.** Use `session.id` for idempotency. The return value is validated against `output`. |
 | `onAbort` | `abort` / expiry / janitor | Optional |
@@ -205,11 +205,11 @@ pre-validation; either is safe. Nested objects namespace endpoints, so `media.do
 | Where | What | Default |
 |---|---|---|
 | Storage | Parts, final object (the source of truth for progress) | always |
-| Session token | key, uploadId, part plan, `meta`, expiry. Server-minted, opaque to the client. | always (stateless server) |
-| Browser `ResumeStore` | token, plan, confirmed parts, file descriptor | IndexedDB |
-| `SessionStore` (yours) | revocation, cross-device resume, recovery after browser storage eviction, exactly-once bookkeeping | **optional** |
+| Session ticket | key, uploadId, part plan, `meta`, expiry. Server-minted, opaque to the client. | always (stateless server) |
+| Browser `ResumeStore` | ticket, plan, confirmed parts, file descriptor | IndexedDB |
+| Your own DB (optional) | the ticket, stored from the `onInit` hook if you want cross-device resume or recovery after browser storage eviction | **never required** |
 
-No database is required. Add a `SessionStore` (a few methods on your existing DB or KV) only if you need what it unlocks.
+The SDK has no database and no DB adapter. The ticket is portable: store it wherever your app already keeps records, and resume with `client.endpoint.resume(file, { ticket })`.
 
 ## Uploads in depth
 
@@ -284,19 +284,21 @@ Built-in codes include `NETWORK_ERROR`, `OFFLINE`, `SIGNED_URL_EXPIRED`, `SESSIO
 
 ## Downloads
 
-```ts
-const { request } = await client.media.download.url({ input: { mediaId } });  // signed URL for <a download> or <video>
-const dl = client.media.download.download({ input: { mediaId }, sink: opfsSink() });  // managed and resumable
+```tsx
+// Tier 0 (default): a stable, per-user link handed to the browser's own download manager.
+<a href={client.media.download.link({ input: { mediaId } })} download>Download</a>
+// Each hit re-authorizes with the user's session, then redirects to a fresh presigned URL (or streams it, in 'proxy' mode).
+// If it fails, the user just clicks again or presses "retry" in the browser.
+
+// Tier 1 (opt-in): managed, parallel, resumable download into the best local sink, e.g. for progress UI or decryption.
+const dl = client.media.download.download({ input: { mediaId }, sink: 'auto' });
 ```
 
-Managed downloads:
-- fetch 8 MiB `Range` chunks
-- pin the object (`versionId`, `If-Match` ETag), so a changed object is detected and never mixed
-- write to a resumable sink (OPFS on Safari 15.2 and later, File System Access on Chromium)
-- re-resolve expired URLs
+- In `'redirect'` mode (zero infra), resuming an interrupted download works while the presigned URL is valid. Browsers resume against the final URL.
+- In `'proxy'` mode (an edge function next to the bucket, e.g. Worker + R2), resuming works in every browser.
 
 A download is **not** a mirror of a multipart upload. There is no server-side session to complete or abort and nothing billed while
-paused, but the client must keep the bytes somewhere. See [SPEC §14](./docs/SPEC.md#14-downloads-d1-d2).
+paused, but resume depends on validators (ETag or versionId) and on where the browser keeps the bytes. See [SPEC §14](./docs/SPEC.md#14-downloads-d1-d2-d3).
 
 ## React
 
@@ -321,6 +323,13 @@ function TripUploader({ albumId }: { albumId: string }) {
 
 The hooks are thin `useSyncExternalStore` bindings over the client stores, so they re-render only on change. The UI is **copy-in**:
 `npx shadcn add <registry>/upload-dropzone` (planned). The components are yours to style, and they take a headless `control` or task prop.
+
+## Plugging into a CMS or backend
+
+The SDK moves bytes and owns nothing else. Auth comes from your context factory. Your hooks decide keys and IDs, write your
+records, and optionally store the portable ticket. Records are created either inline in `onComplete`, or later from a sealed
+**receipt** that your CMS verifies with `uploads.verifyReceipt()`. Sketches for Payload and Convex are in
+[docs/INTEGRATIONS.md](./docs/INTEGRATIONS.md).
 
 ## Bucket setup
 
@@ -355,7 +364,7 @@ The SDK sets no arbitrary limit. The providers do:
 
 On the browser side:
 - On iOS, uploads stop when the screen locks or Safari goes to the background. The SDK doesn't fight the OS; it makes resuming exact.
-- Safari can delete site storage after 7 days of use **without visiting your site**. Recovering in that case needs a `SessionStore`.
+- Safari can delete site storage after 7 days of use **without visiting your site**. Recovering in that case requires your app to have stored the ticket (`onInit`).
 
 Sources and the full provider table: [docs/research/storage-and-browser.md](./docs/research/storage-and-browser.md).
 
@@ -379,6 +388,7 @@ docs/OUTLINE.md            intentions, phase plan, targeted questions
 docs/DECISIONS.md          decision log with statuses (all PROPOSED / OPEN)
 docs/SPEC.md               protocol, state, engine, identity, limits, downloads
 docs/NAMING.md             name collisions
+docs/INTEGRATIONS.md       CMS / Convex integration model (Payload, Convex sketches)
 docs/E2EE-PERSPECTIVE.md   future encrypted transfer demonstrator (not in scope)
 docs/research/             sourced research notes (dated 2026-11-12)
 packages/*/src             TypeScript interfaces only (declare-only, no runtime)

@@ -20,7 +20,7 @@ reloads and multi-day pauses (U2), never mixes two files (U3), honest about limi
 | Package | Runs on | Contains | Depends on |
 |---|---|---|---|
 | `core` | anywhere | contract builder, wire protocol types, error model, storage/client ports, task model | — (Standard Schema interface vendored) |
-| `server` | server | `implement()`, middleware, hooks, `createUploadServer()` → Fetch handler, session tokens | core |
+| `server` | server | `implement()`, middleware, hooks, `createUploadServer()` → Fetch handler, session tickets | core |
 | `server/node` (subpath) | Node | `toNodeHandler()` for `http` / Express / Connect | server |
 | `s3` | server | S3-compatible `StorageAdapter` + provider presets | core |
 | `client` | browser (+ RN later) | upload/download engines, IndexedDB store, worker hasher, XHR transport | core |
@@ -72,7 +72,7 @@ const uploads = createUploadServer({ router, storage: s3Storage({...}), secret: 
   (`next({ user })`), typed end to end. Auth is therefore whatever the app already uses (cookie session, JWT,
   Better Auth, Clerk, …) — the SDK has no auth system of its own (A6).
 - **`authorize`** runs once per `init` batch after schema + file-rule validation. Its return value (`meta`) is server-only
-  and bound to each session. Later ops verify the session token; `reauthorize` can re-check on every op.
+  and bound to each session. Later ops verify the session ticket; `reauthorize` can re-check on every op.
 - **`key`** decides the object key. Never derive paths from `file.name` (path traversal, collisions, privacy).
 - **`onComplete`** is called after the storage confirms the object; its return is validated against `output` and sent to
   the client. Delivery is **at-least-once** (§9). Use `session.id` as idempotency key.
@@ -87,11 +87,11 @@ const uploads = createUploadServer({ router, storage: s3Storage({...}), secret: 
 
 | Op | Request | Server work | Response |
 |---|---|---|---|
-| `init` | `input`, `files[]` (descriptors only), optional `resume` | validate input + rules, `authorize`, plan parts, `CreateMultipartUpload` (or prepare single PUT), mint session token(s); optionally sign the first batch | `sessions[]` (token, plan, expiresAt, uploadedParts, first signed parts) |
-| `sign` | `token`, `parts[]` (+ checksum per part) | verify token, sign `UploadPart` (checksum header signed) | signed requests, each with `expiresAt` |
-| `status` | `token` | `ListParts` (paginated) | storage-truth parts, state, **renewed token** |
-| `complete` | `token`, optional client ETags, full-object checksum, content hash | `ListParts`, verify count/sizes/checksums, `CompleteMultipartUpload` (with `x-amz-mp-object-size` / `If-None-Match` where supported), `HeadObject`, `onComplete` | typed `output`, `alreadyCompleted` |
-| `abort` | `token` | `AbortMultipartUpload` (+ verify via ListParts), `onAbort` | 204 |
+| `init` | `input`, `files[]` (descriptors only), optional `resume` | validate input + rules, `authorize`, plan parts, `CreateMultipartUpload` (or prepare single PUT), mint session ticket(s); optionally sign the first batch | `sessions[]` (ticket, plan, expiresAt, uploadedParts, first signed parts) |
+| `sign` | `ticket`, `parts[]` (+ checksum per part) | verify ticket, sign `UploadPart` (checksum header signed) | signed requests, each with `expiresAt` |
+| `status` | `ticket` | `ListParts` (paginated) | storage-truth parts, state, **renewed ticket** |
+| `complete` | `ticket`, optional client ETags, full-object checksum, content hash | `ListParts`, verify count/sizes/checksums, `CompleteMultipartUpload` (with `x-amz-mp-object-size` / `If-None-Match` where supported), `HeadObject`, `onComplete` | typed `output`, `alreadyCompleted` |
+| `abort` | `ticket` | `AbortMultipartUpload` (+ verify via ListParts), `onAbort` | 204 |
 | `download` | `input` | `resolve`, `HeadObject`, sign `GetObject` (versionId, content-disposition) | signed request + size/etag/versionId |
 
 Errors: `{ error: { code, message, retryable, userAction, status, data } }` with the matching HTTP status. The protocol
@@ -102,29 +102,34 @@ is documented so non-JS clients (Swift, Kotlin, CLI) can exist; the TS client is
 ### 6.1 Default: stateless server
 
 The server keeps **no database**. Each session's facts — `sessionId, endpoint, key, uploadId, plan, file descriptor,
-meta, issuedAt, expiresAt, protocol version` — travel in a **session token** minted by the server. The storage is the
+meta, issuedAt, expiresAt, protocol version` — travel in a **session ticket** minted by the server. The storage is the
 source of truth for progress (`ListParts`) and completion (`HeadObject`).
 
-- Proposed token format: a standard compact **JWE (`dir` + `A256GCM`) or JWS** produced by a vetted library (e.g. `jose`),
+- Proposed ticket format: a standard compact **JWE (`dir` + `A256GCM`) or JWS** produced by a vetted library (e.g. `jose`),
   not a custom format. JWE keeps `meta` and the key opaque to the client; JWS is simpler but readable (D-004).
 - Secret rotation: `secret: [current, ...previous]` — first signs, all verify.
-- Expiry: `min(resume.ttl, provider cleanup window, lifecycle rule)`. `status` renews the token (sliding) up to the
+- Expiry: `min(resume.ttl, provider cleanup window, lifecycle rule)`. `status` renews the ticket (sliding) up to the
   absolute `resume.ttl`.
 - **Limits of stateless:** no revocation before expiry (mitigated by `reauthorize`, short sliding expiry, and `abort`
-  making the uploadId void); no cross-device listing; no recovery if the client loses its local record.
+  making the uploadId void); cross-device listing and recovery only if the host app stored the ticket (§6.2).
 
-### 6.2 Optional: `SessionStore`
+### 6.2 No `SessionStore`: the ticket is portable (owner decision, Q2)
 
-A small port (`get/put/delete`, optional `findByFingerprint`, `markCompleted`) the app implements on its existing DB/KV.
-With a store, the token becomes a random reference, and the server gains revocation, cross-device resume,
-**recovery after client storage eviction** (Safari ITP, §13), quota accounting and exactly-once completion bookkeeping.
-The SDK would ship `memorySessionStore()` for tests and document recipes (SQL table, Redis, Cloudflare KV/D1) rather
-than depend on any of them.
+The SDK ships **no database port**. The ticket is self-contained, so whoever holds it can resume:
+
+- **The browser** keeps it in IndexedDB, which is the default and covers reloads and multi-day pauses on the same device.
+- **The host app** may also keep it. The server hook `onInit({ ticket, session, context, input })` fires once per session, so the app can
+  write a "pending upload" row in *its* DB: a CMS draft document, a Convex table, whatever it already has. Later, on any device,
+  the app hands the ticket back: `client.endpoint.resume(file, { ticket })`. The same identity checks apply (§10).
+- **Nobody** kept it: the upload is lost. Its parts are reclaimed by the bucket lifecycle rule. This is accepted.
+
+What a host DB would add (revocation, admin lists, quotas across sessions, exactly-once bookkeeping) is the host's business,
+done with the hooks (`onInit`, `reauthorize`, `onComplete`, `onAbort`). The SDK does not abstract it.
 
 ### 6.3 Client persistence
 
 `ResumeStore` port, default IndexedDB. Record = `PersistedUpload` (`core/src/task.ts`): endpoint, baseUrl, file
-descriptor, token, plan, confirmed parts with checksums, optional hash state, input. **No file bytes, no presigned URLs,
+descriptor, ticket, plan, confirmed parts with checksums, optional hash state, input. **No file bytes, no presigned URLs,
 no secrets.** Calls `navigator.storage.persist()` when available.
 
 Cross-tab safety: a task takes a Web Lock (`navigator.locks`) named after its session id so two tabs never drive the
@@ -141,7 +146,7 @@ partCount = ceil(size / partSize)          // all parts equal except the last (s
 
 Proposed defaults: `preferred = 8 MiB`, `singlePutThreshold = 8 MiB`. Rationale for the iPhone case: a lost part costs at
 most 8 MiB of re-upload; 10,000 × 8 MiB ≈ 78 GiB before part size grows automatically. The plan is **fixed for the
-life of the session** (resume needs identical part boundaries) and is part of the signed token.
+life of the session** (resume needs identical part boundaries) and is part of the signed ticket.
 
 ## 8. Upload engine (U1, U4, U5)
 
@@ -203,7 +208,7 @@ Lock helper (iOS 18.4+) is left to the app.
 | `init` | Each call creates a new session unless `resume` matches an existing one. Retrying a lost `init` response leaks one empty multipart upload, reclaimed by lifecycle (§11). |
 | part PUT | Same part number overwrites; last write wins (S3, R2). Deterministic bytes ⇒ same checksum. |
 | `sign`, `status` | Pure. |
-| `complete` | If storage says `NoSuchUpload`, server `HeadObject(key)`; when size + session metadata (`x-amz-meta-bu-session`) match, returns `alreadyCompleted: true`. `onComplete` may run again ⇒ at-least-once; `SessionStore.markCompleted` gives exactly-once bookkeeping when present. `If-None-Match: *` prevents overwriting a different existing object where supported. |
+| `complete` | If storage says `NoSuchUpload`, server `HeadObject(key)`; when size + session metadata (`x-amz-meta-bu-session`) match, returns `alreadyCompleted: true`. `onComplete` may run again ⇒ at-least-once; exactly-once bookkeeping is the host's (e.g. unique constraint on `session.id`). `If-None-Match: *` prevents overwriting a different existing object where supported. |
 | `abort` | Repeatable; verifies with ListParts (in-flight parts may land after abort). |
 
 ## 10. File identity and resume (U2, U3)
@@ -232,7 +237,7 @@ per-part digest — weaker (proves consistency with what *this client* sent, not
 - **URLs** are signed lazily per batch with short TTL (15 min default), capped by `caps.maxPresignExpiry` and by the
   expiry of temporary credentials (STS: often 1 h). Never presign a multi-day upload up front. 403-expired ⇒ re-sign.
 - **Credentials** are a provider function on the adapter (`() => Promise<S3Credentials>`), refreshed before expiry.
-- **Session expiry** ≠ URL expiry: sessions last days (token, sliding), URLs minutes.
+- **Session expiry** ≠ URL expiry: sessions last days (ticket, sliding), URLs minutes.
 - **Reconciliation:** `status` returns storage truth; client merges (storage wins). `complete` re-lists parts server-side
   (does not need CORS `ExposeHeaders: ETag`), checks part count = plan, each non-last part size = `partSize`, checksums
   match those signed, then completes. AWS warns not to build Complete from ListParts because in-flight parts are not
@@ -244,7 +249,7 @@ per-part digest — weaker (proves consistency with what *this client* sent, not
   config itself. A janitor (`listMultipartUploads` by prefix, abort older than TTL) is a documented recipe for providers
   without lifecycle support.
 - **Orphan objects** (completed in storage, `onComplete` failed): the client retries `complete` (idempotent). For
-  stronger guarantees, apps can key under a `staging/` prefix and promote, or reconcile from a `SessionStore` (D-012).
+  stronger guarantees, apps can key under a `staging/` prefix and promote, or reconcile from the pending rows written in `onInit` (D-012).
 
 ## 12. Limits (U9) — documented, not promised
 
@@ -267,26 +272,48 @@ per-part digest — weaker (proves consistency with what *this client* sent, not
    part. Concurrency adapts down; expired URLs re-signed transparently; offline periods don't burn retries.
 4. Day 5: `complete` → `onComplete` → typed output.
 
-Risks: (a) Safari ITP deletes IndexedDB after 7 days of Safari use **without visiting the site** — recovery then needs a
-`SessionStore` (§6.2) or a restart; (b) provider cleanup windows (R2 7 d) must exceed `resume.ttl`; (c) transcoded
+Risks: (a) Safari ITP deletes IndexedDB after 7 days of Safari use **without visiting the site** — recovery then needs the
+host app to have stored the ticket (§6.2), otherwise restart; (b) provider cleanup windows (R2 7 d) must exceed `resume.ttl`; (c) transcoded
 re-picks are detected (FILE_MISMATCH), not silently mixed.
 
-## 14. Downloads (D1, D2)
+## 14. Downloads (D1, D2, D3)
 
-`download` resolves an authorized signed GET (`versionId` pinned when the bucket is versioned,
-`response-content-disposition` for file name). Two client modes:
+Owner requirement (D3): **one link per user**, and if it fails the user just presses "retry" in the browser. Research:
+[research/downloads.md](./research/downloads.md). The proposal has three tiers.
 
-- `url()` — just the signed URL, for `<a download>`, `<video>`, native download manager.
-- `download()` — managed ranged download: `Range: bytes=a-b` chunks (8 MiB), validator `If-Match: <etag>` (412 on change)
-  or pinned `versionId`; a `200` received where `206` was expected means the representation changed ⇒ restart, never
-  append. Bytes go to a `DownloadSink` (OPFS on Safari ≥ 15.2; FileSystemWritableFileStream on Safari ≥ 26 /
-  Chromium; memory for small files). Expired URL ⇒ re-`download` op (cheap, stateless).
+**Tier 0: native download manager (default).** `client.media.download.link({ input })` returns a **stable** URL,
+`GET {base}/media/download?mediaId=…`. It is per-user because each hit re-runs `resolve` with the app's own session/cookie.
+For links shared without a session, the server can mint a sealed, expiring link instead (`/l/{linkTicket}`).
+- `delivery: 'redirect'` (default, zero infra): the server replies 302 to a fresh presigned GET (`versionId` pinned,
+  `response-content-disposition`, **`Range` never signed**).
+  - Retry always works, because a re-click hits the stable link again.
+  - Resume of an interrupted download works only until the presigned URL expires, because Chromium resumes against the final URL
+    (commit 6ac869d). So `expiresIn` defaults to a generous value, capped at 7 d, and capped further by temporary credentials.
+- `delivery: 'proxy'` (opt-in): the stable link itself streams the bytes with `Range`/`If-Range` pass-through and a strong ETag.
+  Resume works in every browser's manager, including iOS Safari.
+  - It is meant for edge runtimes next to the bucket: Cloudflare Worker + R2 means zero egress and cheap compute.
+  - It needs `StorageAdapter.getObject`.
+
+**Tier 1: managed download (opt-in).** `client.media.download.download({ input, sink: 'auto' })`:
+- fetches `Range` chunks in parallel in a worker, with an `If-Match`/`If-Range` validator. A `200` received where `206` was
+  expected means the object changed, so the download restarts and never appends;
+- re-resolves on 403 and persists progress per chunk;
+- picks the sink by capability:
+  - **File System Access** (Chromium desktop and Android 132+): writes directly to the user's file, with no double disk and resume via a stored handle;
+  - **OPFS + export** (Safari 15.2+, Firefox 111+): checks `estimate()` and calls `persist()`. Export temporarily doubles disk use, and Safari may evict after 7 d idle;
+  - **service-worker stream**: constant memory, **not resumable**;
+  - **memory**: small files only.
+
+**When to use which:** Tier 0 for normal downloads, including tens of GB on iPhone, where the native manager is the most robust option.
+Tier 1 when the app needs progress UI, parallel speed, integrity checks, or client-side **decryption** (E2EE makes Tier 1 mandatory).
+
+**Multiple files:** one link per file by default. A client-side streamed zip (STORE + Zip64, exact length) is possible later, but it is not resumable.
 
 | | Multipart upload | Ranged download |
 |---|---|---|
 | Server state | multipart upload id in storage (billed while incomplete) | none |
 | Unit | numbered parts, fixed plan, ≥ 5 MiB (except last) | arbitrary byte ranges |
-| Consistency | uploadId + per-part checksums + plan in token | ETag / versionId validators |
+| Consistency | uploadId + per-part checksums + plan in ticket | ETag / versionId validators |
 | Finish | explicit `complete` (atomic object creation) | nothing to complete |
 | Cancel | `abort` needed (cost) | just stop |
 | Resume state | storage (ListParts) + client record | client sink only |
@@ -294,13 +321,13 @@ re-picks are detected (FILE_MISMATCH), not silently mixed.
 
 ## 15. Security considerations
 
-- Contract and client hold no secrets; the token secret and bucket credentials are server-only.
+- Contract and client hold no secrets; the ticket secret and bucket credentials are server-only.
 - Presigned requests are scoped to one key + part + method + checksum, short-lived.
 - Object keys come from `key()`, never from client file names. `keyPrefix` in the adapter as defence in depth.
 - `accept`/sizes are re-checked server-side at `init`; the declared size is enforced by the signed `Content-Length` per
   part and by the size check at `complete`. Content-type sniffing is the app's job (post-upload).
 - Fingerprints sent to the server are opaque (hash of descriptor + sampled bytes); a privacy mode can avoid sending names.
-- Rate-limit `init` per user (middleware); cap concurrent sessions per user via `SessionStore` if needed.
+- Rate-limit `init` per user (middleware); cap concurrent sessions per user in the host DB via `onInit`/`authorize` if needed.
 
 ## 16. Extension points reserved for E2EE (F1–F3)
 
