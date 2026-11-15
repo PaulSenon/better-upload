@@ -12,81 +12,81 @@
 
 ### Process & scope (P)
 
-| ID | Requirement |
-|---|---|
-| P1 | Public GitHub repo `better-upload` on the authenticated account; check identity; never overwrite an existing repo; no secrets or private data. |
-| P2 | "Better Upload" is a **provisional** name; document npm/brand collisions without blocking. |
-| P3 | **Phase 1 only:** research of intentions & alternatives, outline + targeted questions, README draft (core/server/client/React), spec + TS interfaces, compilable examples/type tests if useful. |
-| P4 | **Not authorized:** runtime implementation, website, demo, deployment, npm publish. |
-| P5 | Proposals are **not decisions**; the project owner validates README + types before implementation. |
-| P6 | Keep: this exhaustive brief, decisions/questions with statuses, sourced research with versions/dates, README & types clearly marked as design. |
-| P7 | Final report: confirmed URL, state, points to arbitrate. |
+| ID  | Requirement                                                                                                                                                                                     |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | Public GitHub repo `better-upload` on the authenticated account; check identity; never overwrite an existing repo; no secrets or private data.                                                  |
+| P2  | "Better Upload" is a **provisional** name; document npm/brand collisions without blocking.                                                                                                      |
+| P3  | **Phase 1 only:** research of intentions & alternatives, outline + targeted questions, README draft (core/server/client/React), spec + TS interfaces, compilable examples/type tests if useful. |
+| P4  | **Not authorized:** runtime implementation, website, demo, deployment, npm publish.                                                                                                             |
+| P5  | Proposals are **not decisions**; the project owner validates README + types before implementation.                                                                                              |
+| P6  | Keep: this exhaustive brief, decisions/questions with statuses, sourced research with versions/dates, README & types clearly marked as design.                                                  |
+| P7  | Final report: confirmed URL, state, points to arbitrate.                                                                                                                                        |
 
 ### Product goals (G)
 
-| ID | Requirement |
-|---|---|
-| G1 | OSS SDK for upload **and** download, infra-agnostic, type-safe; S3-compatible first. |
-| G2 | DX: a few connections only — bucket + contract + router + client. |
-| G3 | UX: robust pause / resume / progress, usable errors, cancellation. |
-| G4 | No mandatory cloud or DB without justification; study minimal persistent client/server state and adapters. |
+| ID  | Requirement                                                                                                |
+| --- | ---------------------------------------------------------------------------------------------------------- |
+| G1  | OSS SDK for upload **and** download, infra-agnostic, type-safe; S3-compatible first.                       |
+| G2  | DX: a few connections only — bucket + contract + router + client.                                          |
+| G3  | UX: robust pause / resume / progress, usable errors, cancellation.                                         |
+| G4  | No mandatory cloud or DB without justification; study minimal persistent client/server state and adapters. |
 
 ### Inspirations to study (I)
 
-| ID | Source | Angle |
-|---|---|---|
-| I1 | oRPC | contract-first DX |
-| I2 | UploadThing | simplicity — **without** mandatory service, without copying blindly |
-| I3 | Alchemy.run v2 | modularity; Effect as inspiration, not obligation |
-| I4 | TanStack | framework-agnostic TS core; React bindings only in v0, others later |
-| I5 | shadcn registry | stylable upload/progress UI components |
+| ID  | Source          | Angle                                                               |
+| --- | --------------- | ------------------------------------------------------------------- |
+| I1  | oRPC            | contract-first DX                                                   |
+| I2  | UploadThing     | simplicity — **without** mandatory service, without copying blindly |
+| I3  | Alchemy.run v2  | modularity; Effect as inspiration, not obligation                   |
+| I4  | TanStack        | framework-agnostic TS core; React bindings only in v0, others later |
+| I5  | shadcn registry | stylable upload/progress UI components                              |
 
 ### Architecture (A)
 
-| ID | Requirement |
-|---|---|
-| A1 | Shared contract describes a *logical* upload endpoint. |
-| A2 | Server implementation of the contract produces a router independent of Express/etc., via adapters. |
-| A3 | One declaration hides init / sign parts / status / complete / abort / refresh URLs. |
-| A4 | Derived client knows routing and configured base URL, holds no secrets. |
-| A5 | Bucket keys server-only. |
-| A6 | Pluggable user auth and validation. |
+| ID  | Requirement                                                                                        |
+| --- | -------------------------------------------------------------------------------------------------- |
+| A1  | Shared contract describes a _logical_ upload endpoint.                                             |
+| A2  | Server implementation of the contract produces a router independent of Express/etc., via adapters. |
+| A3  | One declaration hides init / sign parts / status / complete / abort / refresh URLs.                |
+| A4  | Derived client knows routing and configured base URL, holds no secrets.                            |
+| A5  | Bucket keys server-only.                                                                           |
+| A6  | Pluggable user auth and validation.                                                                |
 
 ### Upload engine (U)
 
-| ID | Requirement |
-|---|---|
-| U1 | Multipart upload via presigned URLs. |
-| U2 | Resume after network loss **and** after reload, over **days**, after the user re-selects the file. |
-| U3 | Reliable file identity — never confuse two files. |
-| U4 | Performant hashing, bounded memory, workers. |
-| U5 | Retries, backoff, adaptive concurrency, integrity, idempotency. |
-| U6 | Renewal of signed URLs and credentials. |
-| U7 | Reconciliation of parts between server and storage. |
-| U8 | Lifecycle cleanup, cost of orphan parts, provider limits. |
-| U9 | Very large files: no arbitrary SDK limit, but document S3 / provider / browser limits; no "unlimited" promise. |
+| ID  | Requirement                                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| U1  | Multipart upload via presigned URLs.                                                                                                                                                       |
+| U2  | Resume after network loss **and** after reload, over **days**, after the user re-selects the file.                                                                                         |
+| U3  | Reliable file identity — never confuse two files.                                                                                                                                          |
+| U4  | Performant hashing, bounded memory, workers.                                                                                                                                               |
+| U5  | Retries, backoff, adaptive concurrency, integrity, idempotency.                                                                                                                            |
+| U6  | Renewal of signed URLs and credentials.                                                                                                                                                    |
+| U7  | Reconciliation of parts between server and storage.                                                                                                                                        |
+| U8  | Lifecycle cleanup, cost of orphan parts, provider limits.                                                                                                                                  |
+| U9  | Very large files: no arbitrary SDK limit, but document S3 / provider / browser limits; no "unlimited" promise.                                                                             |
 | U10 | Target case: intermittent uploads from iPhone browser while travelling, over several days. iOS background constraints are **out of the main discussion**; no requirement to bypass the OS. |
 
 ### Download (D)
 
-| ID | Requirement |
-|---|---|
-| D1 | Signed download with resume via HTTP Range, validators, object version. |
-| D2 | Document the differences between true multipart upload and ranged download. |
+| ID  | Requirement                                                                 |
+| --- | --------------------------------------------------------------------------- |
+| D1  | Signed download with resume via HTTP Range, validators, object version.     |
+| D2  | Document the differences between true multipart upload and ranged download. |
 
 ### Future perspective (F) — not to build now
 
-| ID | Requirement |
-|---|---|
-| F1 | Demonstrator: public free transfer service (SwissTransfer / GrosFichiers-like) with end-to-end encryption. |
-| F2 | Examine E2EE implications for resume, chunks, keys, ranges, validation. |
-| F3 | No home-made crypto. |
+| ID  | Requirement                                                                                                |
+| --- | ---------------------------------------------------------------------------------------------------------- |
+| F1  | Demonstrator: public free transfer service (SwissTransfer / GrosFichiers-like) with end-to-end encryption. |
+| F2  | Examine E2EE implications for resume, chunks, keys, ranges, validation.                                    |
+| F3  | No home-made crypto.                                                                                       |
 
 ### Coordination (C)
 
-| ID | Requirement |
-|---|---|
-| C1 | Opus coordinates and arbitrates; may delegate research/review. |
+| ID  | Requirement                                                    |
+| --- | -------------------------------------------------------------- |
+| C1  | Opus coordinates and arbitrates; may delegate research/review. |
 
 ## Addendum — owner feedback round 1 (2026-11-15, verbatim)
 
@@ -108,12 +108,12 @@
 
 ### New / revised requirements
 
-| ID | Requirement |
-|---|---|
+| ID  | Requirement                                                                                                                                                                                                                            |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | G4′ | **No DB in the SDK.** If the browser lost its state and the host app kept nothing, the upload is lost. The host app may persist in-progress uploads itself; the SDK exposes what it needs to resume from that, without owning storage. |
-| G5 | Smooth integration with host systems (e.g. Payload CMS, Convex) where auth, file storage, and ID/link generation + DB records live in different places. Official adapters/plugins/components for major CMSes / Convex later. |
-| D3 | Download UX: one presigned link per user, retryable on failure by just "retry" in the browser; find the best perf/UX/cost/resilience trade-off (native vs managed download). |
-| R1 | Side research: could the SDK be an oRPC v2 extension/plugin? |
+| G5  | Smooth integration with host systems (e.g. Payload CMS, Convex) where auth, file storage, and ID/link generation + DB records live in different places. Official adapters/plugins/components for major CMSes / Convex later.           |
+| D3  | Download UX: one presigned link per user, retryable on failure by just "retry" in the browser; find the best perf/UX/cost/resilience trade-off (native vs managed download).                                                           |
+| R1  | Side research: could the SDK be an oRPC v2 extension/plugin?                                                                                                                                                                           |
 
 ## Addendum — owner feedback round 2 (2026-11-15, verbatim)
 
@@ -123,17 +123,17 @@
 
 ### New / revised requirements (round 2)
 
-| ID | Requirement |
-|---|---|
-| G4″ | **No DB in the SDK** is a core value. Claude chooses the ticket mechanism, optimising type safety, resilience, implementation simplicity and DX. Lost client state + nothing on the host = the upload is restarted from zero, the old one simply expires; **the user must be told**. |
-| I4 | File identity on resume: a different file must be (practically) impossible to accept, at low cost, without the heavy AWS SDK. |
-| S1 | Minimal signer (no AWS SDK). |
-| U11 | Expired/abandoned upload: restart from zero **and tell the user it expired** (Q7 = ask/inform, never silent). |
-| D4 | Downloads: best DX, ideally **progressive enhancement**. Priority = the download is always *possible*; best effort per platform; restarting from zero is acceptable when resume is technically impossible. Proxy mode **only on Cloudflare**. Managed download in **v1**, right after v0. |
-| H1 | Payload: if native resumable/multipart isn't available, contribute upstream or at least be compatible, with a dedicated docs page. |
-| H2 | Convex: ship a **Convex component** like ConvexFS, but **multi-provider** (not tied to Bunny.net), with multipart upload and resilience. |
-| R2 | Side quest (low priority): find the right way to contribute to oRPC for this use case; at least move the debate forward (#482). |
-| N1 | Name search: welcome, not critical. Wants a clear picture of what the existing Better Upload is and whether its approach differs, without cluttering the main thread. |
+| ID  | Requirement                                                                                                                                                                                                                                                                               |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G4″ | **No DB in the SDK** is a core value. Claude chooses the ticket mechanism, optimising type safety, resilience, implementation simplicity and DX. Lost client state + nothing on the host = the upload is restarted from zero, the old one simply expires; **the user must be told**.      |
+| I4  | File identity on resume: a different file must be (practically) impossible to accept, at low cost, without the heavy AWS SDK.                                                                                                                                                             |
+| S1  | Minimal signer (no AWS SDK).                                                                                                                                                                                                                                                              |
+| U11 | Expired/abandoned upload: restart from zero **and tell the user it expired** (Q7 = ask/inform, never silent).                                                                                                                                                                             |
+| D4  | Downloads: best DX, ideally **progressive enhancement**. Priority = the download is always _possible_; best effort per platform; restarting from zero is acceptable when resume is technically impossible. Proxy mode **only on Cloudflare**. Managed download in **v1**, right after v0. |
+| H1  | Payload: if native resumable/multipart isn't available, contribute upstream or at least be compatible, with a dedicated docs page.                                                                                                                                                        |
+| H2  | Convex: ship a **Convex component** like ConvexFS, but **multi-provider** (not tied to Bunny.net), with multipart upload and resilience.                                                                                                                                                  |
+| R2  | Side quest (low priority): find the right way to contribute to oRPC for this use case; at least move the debate forward (#482).                                                                                                                                                           |
+| N1  | Name search: welcome, not critical. Wants a clear picture of what the existing Better Upload is and whether its approach differs, without cluttering the main thread.                                                                                                                     |
 
 ## Addendum — owner feedback round 3 (2026-11-15, verbatim)
 
@@ -143,8 +143,8 @@
 
 ### New / revised requirements (round 3)
 
-| ID | Requirement |
-|---|---|
-| R3 | **Never post anything upstream** (oRPC or elsewhere). The owner posts himself if needed; drafts only. |
+| ID  | Requirement                                                                                                                                                                            |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R3  | **Never post anything upstream** (oRPC or elsewhere). The owner posts himself if needed; drafts only.                                                                                  |
 | H2′ | Convex component first, before Payload. Model it closely on ConvexFS and well-made existing components (Better Auth, Stripe, …); it is also a way to learn how custom components work. |
-| N2 | Name = "<owner prefix> upload", T3-style personal prefix (surname or a short nickname the owner can reuse everywhere). Generic shortlist rejected. |
+| N2  | Name = "<owner prefix> upload", T3-style personal prefix (surname or a short nickname the owner can reuse everywhere). Generic shortlist rejected.                                     |

@@ -3,9 +3,28 @@
  * Thin bindings over the client stores (`useSyncExternalStore`). No markup: UI ships
  * separately as copy-in shadcn registry items (dropzone, progress, list, resume banner).
  */
+
+import type {
+  DownloadEndpointClient,
+  DownloadOptions,
+  EndpointUploadTask,
+  UploadableFile,
+  UploadClient,
+  UploadEndpointClient,
+  UploadOptions,
+} from '@bu-draft/client';
+import type {
+  BuiltinError,
+  ContractRouter,
+  DownloadContract,
+  DownloadSnapshot,
+  DownloadTask,
+  ReadableStore,
+  UploadContract,
+  UploadSnapshot,
+  UploadTask,
+} from '@bu-draft/core';
 import type { ReactNode } from 'react';
-import type { ReadableStore, UploadContract, UploadSnapshot, UploadTask, DownloadContract, DownloadSnapshot, DownloadTask, BuiltinError, ContractRouter } from '@bu-draft/core';
-import type { EndpointUploadTask, UploadClient, UploadEndpointClient, UploadOptions, UploadableFile, DownloadEndpointClient, DownloadOptions } from '@bu-draft/client';
 
 /** Subscribe to any SDK store with an optional selector (re-renders only when the selection changes). */
 export declare function useStoreSnapshot<T, S = T>(store: ReadableStore<T>, selector?: (value: T) => S): S;
@@ -42,13 +61,21 @@ export declare function useUpload<C extends UploadContract<any>>(
   endpoint: UploadEndpointClient<C>,
   options?: {
     includeRestored?: boolean;
-    onComplete?: (output: ReturnType<EndpointUploadTask<C>['getSnapshot']>['output'], task: EndpointUploadTask<C>) => void;
-    onError?: (error: NonNullable<ReturnType<EndpointUploadTask<C>['getSnapshot']>['error']>, task: EndpointUploadTask<C>) => void;
+    onComplete?: (
+      output: ReturnType<EndpointUploadTask<C>['getSnapshot']>['output'],
+      task: EndpointUploadTask<C>,
+    ) => void;
+    onError?: (
+      error: NonNullable<ReturnType<EndpointUploadTask<C>['getSnapshot']>['error']>,
+      task: EndpointUploadTask<C>,
+    ) => void;
   },
 ): UseUploadResult<C>;
 
 /** Unfinished uploads restored from local persistence, typically shown as "Re-select file to continue". */
-export declare function usePendingUploads<T extends ContractRouter>(client: UploadClient<T>): readonly UploadTask<unknown, BuiltinError>[];
+export declare function usePendingUploads<T extends ContractRouter>(
+  client: UploadClient<T>,
+): readonly UploadTask<unknown, BuiltinError>[];
 
 export declare function useDownload<C extends DownloadContract<any>>(
   endpoint: DownloadEndpointClient<C>,
@@ -58,4 +85,7 @@ export declare function useDownload<C extends DownloadContract<any>>(
 };
 
 /** Optional provider: calls `$restore()` once and disposes on unmount. */
-export declare function UploadClientProvider<T extends ContractRouter>(props: { client: UploadClient<T>; children?: ReactNode }): ReactNode;
+export declare function UploadClientProvider<T extends ContractRouter>(props: {
+  client: UploadClient<T>;
+  children?: ReactNode;
+}): ReactNode;

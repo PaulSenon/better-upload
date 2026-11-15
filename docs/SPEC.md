@@ -17,15 +17,15 @@ reloads and multi-day pauses (U2), never mixes two files (U3), honest about limi
 
 ## 2. Packages
 
-| Package | Runs on | Contains | Depends on |
-|---|---|---|---|
-| `core` | anywhere | contract builder, wire protocol types, error model, storage/client ports, task model | — (Standard Schema interface vendored) |
-| `server` | server | `implement()`, middleware, hooks, `createUploadServer()` → Fetch handler, session tickets | core |
-| `server/node` (subpath) | Node | `toNodeHandler()` for `http` / Express / Connect | server |
-| `s3` | server | S3-compatible `StorageAdapter` + provider presets | core |
-| `client` | browser (+ RN later) | upload/download engines, IndexedDB store, worker hasher, XHR transport | core |
-| `react` | browser | hooks over client stores | client |
-| registry (not npm) | — | shadcn items: dropzone, progress, upload list, resume banner | react |
+| Package                 | Runs on              | Contains                                                                                  | Depends on                             |
+| ----------------------- | -------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------- |
+| `core`                  | anywhere             | contract builder, wire protocol types, error model, storage/client ports, task model      | — (Standard Schema interface vendored) |
+| `server`                | server               | `implement()`, middleware, hooks, `createUploadServer()` → Fetch handler, session tickets | core                                   |
+| `server/node` (subpath) | Node                 | `toNodeHandler()` for `http` / Express / Connect                                          | server                                 |
+| `s3`                    | server               | S3-compatible `StorageAdapter` + provider presets                                         | core                                   |
+| `client`                | browser (+ RN later) | upload/download engines, IndexedDB store, worker hasher, XHR transport                    | core                                   |
+| `react`                 | browser              | hooks over client stores                                                                  | client                                 |
+| registry (not npm)      | —                    | shadcn items: dropzone, progress, upload list, resume banner                              | react                                  |
 
 Rationale: TanStack-style framework-free core with thin bindings (I4); oRPC-style contract/implementation split (I1);
 Alchemy-style small provider capability interface (I3). Effect is **not** a dependency (D-008).
@@ -34,9 +34,10 @@ Alchemy-style small provider capability interface (I3). Effect is **not** a depe
 
 ```ts
 const contract = uc.router({
-  travelVideos: uc.upload()
+  travelVideos: uc
+    .upload()
     .files({ accept: ['video/*'], maxFiles: 20 })
-    .input(z.object({ albumId: z.string() }))      // any Standard Schema
+    .input(z.object({ albumId: z.string() })) // any Standard Schema
     .output(z.object({ mediaId: z.string() }))
     .errors({ QUOTA_EXCEEDED: { status: 403, data: z.object({ remainingBytes: z.number() }) } })
     .resume({ ttl: '7d', verify: 'auto' })
@@ -47,7 +48,7 @@ const contract = uc.router({
 
 - A contract is **isomorphic and secret-free**. It may be imported on the client as a type only, or as a value to
   enable client-side pre-validation (`accept`, sizes). Shipping it is safe by construction.
-- One `upload()` = one *logical* endpoint. It hides the operations `init`, `sign`, `status`, `complete`, `abort`
+- One `upload()` = one _logical_ endpoint. It hides the operations `init`, `sign`, `status`, `complete`, `abort`
   (§5). "Refresh URLs" is `sign` again; "refresh session" is `status` (sliding renewal).
 - Nested objects namespace endpoints; the wire path is the key path joined with `/` (`media/download`).
 - No default size limit (U9). Provider limits are enforced by the storage adapter (§12).
@@ -85,14 +86,14 @@ const uploads = createUploadServer({ router, storage: s3Storage({...}), secret: 
 
 `POST {baseUrl}/{endpointPath}/{op}`, JSON bodies, header `bu-protocol: 1`. Types in `core/src/protocol.ts`.
 
-| Op | Request | Server work | Response |
-|---|---|---|---|
-| `init` | `input`, `files[]` (descriptors only), optional `resume` | validate input + rules, `authorize`, plan parts, `CreateMultipartUpload` (or prepare single PUT), mint session ticket(s); optionally sign the first batch | `sessions[]` (ticket, plan, expiresAt, uploadedParts, first signed parts) |
-| `sign` | `ticket`, `parts[]` (+ checksum per part) | verify ticket, sign `UploadPart` (checksum header signed) | signed requests, each with `expiresAt` |
-| `status` | `ticket` | `ListParts` (paginated) | storage-truth parts, state, **renewed ticket** |
-| `complete` | `ticket`, optional client ETags, full-object checksum, content hash | `ListParts`, verify count/sizes/checksums, `CompleteMultipartUpload` (with `x-amz-mp-object-size` / `If-None-Match` where supported), `HeadObject`, `onComplete` | typed `output`, `alreadyCompleted` |
-| `abort` | `ticket` | `AbortMultipartUpload` (+ verify via ListParts), `onAbort` | 204 |
-| `download` | `input` | `resolve`, `HeadObject`, sign `GetObject` (versionId, content-disposition) | signed request + size/etag/versionId |
+| Op         | Request                                                             | Server work                                                                                                                                                      | Response                                                                  |
+| ---------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `init`     | `input`, `files[]` (descriptors only), optional `resume`            | validate input + rules, `authorize`, plan parts, `CreateMultipartUpload` (or prepare single PUT), mint session ticket(s); optionally sign the first batch        | `sessions[]` (ticket, plan, expiresAt, uploadedParts, first signed parts) |
+| `sign`     | `ticket`, `parts[]` (+ checksum per part)                           | verify ticket, sign `UploadPart` (checksum header signed)                                                                                                        | signed requests, each with `expiresAt`                                    |
+| `status`   | `ticket`                                                            | `ListParts` (paginated)                                                                                                                                          | storage-truth parts, state, **renewed ticket**                            |
+| `complete` | `ticket`, optional client ETags, full-object checksum, content hash | `ListParts`, verify count/sizes/checksums, `CompleteMultipartUpload` (with `x-amz-mp-object-size` / `If-None-Match` where supported), `HeadObject`, `onComplete` | typed `output`, `alreadyCompleted`                                        |
+| `abort`    | `ticket`                                                            | `AbortMultipartUpload` (+ verify via ListParts), `onAbort`                                                                                                       | 204                                                                       |
+| `download` | `input`                                                             | `resolve`, `HeadObject`, sign `GetObject` (versionId, content-disposition)                                                                                       | signed request + size/etag/versionId                                      |
 
 Errors: `{ error: { code, message, retryable, userAction, status, data } }` with the matching HTTP status. The protocol
 is documented so non-JS clients (Swift, Kotlin, CLI) can exist; the TS client is the reference.
@@ -121,7 +122,7 @@ The SDK ships **no database port**. The ticket is self-contained, so whoever hol
 
 - **The browser** keeps it in IndexedDB, which is the default and covers reloads and multi-day pauses on the same device.
 - **The host app** may also keep it. The server hook `onInit({ ticket, session, context, input })` fires once per session, so the app can
-  write a "pending upload" row in *its* DB: a CMS draft document, a Convex table, whatever it already has. Later, on any device,
+  write a "pending upload" row in _its_ DB: a CMS draft document, a Convex table, whatever it already has. Later, on any device,
   the app hands the ticket back: `client.endpoint.resume(file, { ticket })`. The same identity checks apply (§10).
 - **Nobody** kept it: the upload is lost. Its parts are reclaimed by the bucket lifecycle rule. This is accepted.
 
@@ -183,19 +184,19 @@ default; `mode: 'fixed'` available.
 
 ### 8.4 Retries and error classification
 
-| Signal | Classification | Action |
-|---|---|---|
-| network error / timeout | transient | backoff (full jitter, base 1 s, cap 60 s); offline time doesn't consume attempts |
-| `navigator.onLine === false`, `offline` event, failing probe | `waiting-network` | wait for `online` / visibility / periodic probe |
-| 403 `AccessDenied` "Request has expired" / URL past `expiresAt` | `SIGNED_URL_EXPIRED` | re-`sign` immediately, does not consume an attempt |
-| 400 `BadDigest` / `InvalidDigest` | data changed or read error | re-read + re-hash once; then `FILE_MISMATCH` |
-| `NotReadableError` reading the Blob | `FILE_UNREADABLE` | pause; `userAction: 'reselect-file'` |
-| 404 `NoSuchUpload` | session gone | `status` → completed? finish : `SESSION_NOT_FOUND` → task status `'expired'`, `userAction: 'restart'`; never restarted silently (D-010) |
-| 429 / 503 `SlowDown` | `STORAGE_THROTTLED` | honour `Retry-After`, halve concurrency |
-| 5xx | transient | backoff |
-| 401 from app server | `UNAUTHORIZED` | pause task (not fail), `userAction: 'sign-in'`, `retry()` after re-auth |
-| contract error | as declared | `retryable` / `userAction` from the declaration |
-| attempts exhausted | `failed`, retryable | `retry()` resets the budget |
+| Signal                                                          | Classification             | Action                                                                                                                                  |
+| --------------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| network error / timeout                                         | transient                  | backoff (full jitter, base 1 s, cap 60 s); offline time doesn't consume attempts                                                        |
+| `navigator.onLine === false`, `offline` event, failing probe    | `waiting-network`          | wait for `online` / visibility / periodic probe                                                                                         |
+| 403 `AccessDenied` "Request has expired" / URL past `expiresAt` | `SIGNED_URL_EXPIRED`       | re-`sign` immediately, does not consume an attempt                                                                                      |
+| 400 `BadDigest` / `InvalidDigest`                               | data changed or read error | re-read + re-hash once; then `FILE_MISMATCH`                                                                                            |
+| `NotReadableError` reading the Blob                             | `FILE_UNREADABLE`          | pause; `userAction: 'reselect-file'`                                                                                                    |
+| 404 `NoSuchUpload`                                              | session gone               | `status` → completed? finish : `SESSION_NOT_FOUND` → task status `'expired'`, `userAction: 'restart'`; never restarted silently (D-010) |
+| 429 / 503 `SlowDown`                                            | `STORAGE_THROTTLED`        | honour `Retry-After`, halve concurrency                                                                                                 |
+| 5xx                                                             | transient                  | backoff                                                                                                                                 |
+| 401 from app server                                             | `UNAUTHORIZED`             | pause task (not fail), `userAction: 'sign-in'`, `retry()` after re-auth                                                                 |
+| contract error                                                  | as declared                | `retryable` / `userAction` from the declaration                                                                                         |
+| attempts exhausted                                              | `failed`, retryable        | `retry()` resets the budget                                                                                                             |
 
 ### 8.5 Lifecycle signals
 
@@ -205,13 +206,13 @@ Lock helper (iOS 18.4+) is left to the app.
 
 ## 9. Idempotency (U5)
 
-| Op | Idempotent how |
-|---|---|
-| `init` | Each call creates a new session unless `resume` matches an existing one. Retrying a lost `init` response leaks one empty multipart upload, reclaimed by lifecycle (§11). |
-| part PUT | Same part number overwrites; last write wins (S3, R2). Deterministic bytes ⇒ same checksum. |
-| `sign`, `status` | Pure. |
-| `complete` | If storage says `NoSuchUpload`, server `HeadObject(key)`; when size + session metadata (`x-amz-meta-bu-session`) match, returns `alreadyCompleted: true`. `onComplete` may run again ⇒ at-least-once; exactly-once bookkeeping is the host's (e.g. unique constraint on `session.id`). `If-None-Match: *` prevents overwriting a different existing object where supported. |
-| `abort` | Repeatable; verifies with ListParts (in-flight parts may land after abort). |
+| Op               | Idempotent how                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `init`           | Each call creates a new session unless `resume` matches an existing one. Retrying a lost `init` response leaks one empty multipart upload, reclaimed by lifecycle (§11).                                                                                                                                                                                                    |
+| part PUT         | Same part number overwrites; last write wins (S3, R2). Deterministic bytes ⇒ same checksum.                                                                                                                                                                                                                                                                                 |
+| `sign`, `status` | Pure.                                                                                                                                                                                                                                                                                                                                                                       |
+| `complete`       | If storage says `NoSuchUpload`, server `HeadObject(key)`; when size + session metadata (`x-amz-meta-bu-session`) match, returns `alreadyCompleted: true`. `onComplete` may run again ⇒ at-least-once; exactly-once bookkeeping is the host's (e.g. unique constraint on `session.id`). `If-None-Match: *` prevents overwriting a different existing object where supported. |
+| `abort`          | Repeatable; verifies with ListParts (in-flight parts may land after abort).                                                                                                                                                                                                                                                                                                 |
 
 ## 10. File identity and resume (U2, U3)
 
@@ -222,14 +223,14 @@ bytes between picks. Identity is therefore layered (`core/src/identity.ts`):
 2. **Plan match** — size must equal `plan.fileSize`.
 3. **Content proof** — re-checksum already-uploaded parts and compare with checksums **reported by the storage**
    (`status` → ListParts), per `resume.verify`:
-   - `auto` *(default)*: `sample`, **escalated to `full`** when a cheap signal disagrees: `lastModified` or `type`
+   - `auto` _(default)_: `sample`, **escalated to `full`** when a cheap signal disagrees: `lastModified` or `type`
      changed, several persisted sessions match, or the storage can't report checksums for the sampled parts;
    - `metadata`: skip (fastest; unsafe if bytes may differ; opt-in only);
    - `sample`: first, last uploaded, and k random uploaded parts (k = 3, random so no fixed blind spot);
    - `full`: all uploaded parts (local read only, no network; bounded memory, O(uploaded bytes) CPU).
 
    **Why this is "practically impossible to fool" at low cost (owner goal, round 2).**
-   - A *different* file (another video, an iOS re-encode) differs almost everywhere: it fails the size check or the first
+   - A _different_ file (another video, an iOS re-encode) differs almost everywhere: it fails the size check or the first
      sampled part. A false accept needs a CRC32C collision on every sampled part (≈ 2⁻³² each).
    - The only case a sample could miss is a file **edited in place** in an unsampled region with the same size. Edits change
      `lastModified`, which triggers `full` under `auto`.
@@ -244,7 +245,7 @@ re-selected file's bytes at the same offsets**. No full-file hash is required. O
 incremental hasher whose state is persisted per part boundary (hash-wasm `save()/load()`), so resume doesn't re-hash.
 
 Without checksums (providers that don't support them, e.g. Supabase S3), `sample`/`full` fall back to a locally stored
-per-part digest — weaker (proves consistency with what *this client* sent, not what storage holds). Documented.
+per-part digest — weaker (proves consistency with what _this client_ sent, not what storage holds). Documented.
 
 ## 11. Signed URLs, credentials, reconciliation, lifecycle (U6, U7, U8)
 
@@ -267,13 +268,13 @@ per-part digest — weaker (proves consistency with what *this client* sent, not
 
 ## 12. Limits (U9) — documented, not promised
 
-| Layer | Limit |
-|---|---|
-| AWS S3 | 10,000 parts; 5 MiB–5 GiB parts; 48.8 TiB object; single PUT ≤ 5 GiB; presign ≤ 7 d |
-| Cloudflare R2 | same parts; **equal part sizes**; 4.995 TiB object; incomplete uploads aborted after 7 d by default |
-| Others | see [research/storage-and-browser.md](./research/storage-and-browser.md) (B2 10 TB, Spaces 5 TB, MinIO 24 h cleanup, Scaleway possibly 1,000 parts…) |
-| Browser | no SDK limit; `File.slice` is lazy. iOS: the picker may copy large files into temp storage; device free space matters; screen lock stops uploads. |
-| SDK | none arbitrary. Planner raises `PROVIDER_LIMIT_EXCEEDED` with the provider limit when a file can't fit. |
+| Layer         | Limit                                                                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AWS S3        | 10,000 parts; 5 MiB–5 GiB parts; 48.8 TiB object; single PUT ≤ 5 GiB; presign ≤ 7 d                                                                  |
+| Cloudflare R2 | same parts; **equal part sizes**; 4.995 TiB object; incomplete uploads aborted after 7 d by default                                                  |
+| Others        | see [research/storage-and-browser.md](./research/storage-and-browser.md) (B2 10 TB, Spaces 5 TB, MinIO 24 h cleanup, Scaleway possibly 1,000 parts…) |
+| Browser       | no SDK limit; `File.slice` is lazy. iOS: the picker may copy large files into temp storage; device free space matters; screen lock stops uploads.    |
+| SDK           | none arbitrary. Planner raises `PROVIDER_LIMIT_EXCEEDED` with the provider limit when a file can't fit.                                              |
 
 ## 13. Target scenario walkthrough — iPhone, travelling, several days (U10)
 
@@ -293,10 +294,11 @@ re-picks are detected (FILE_MISMATCH), not silently mixed.
 ## 14. Downloads (D1, D2, D3)
 
 Owner requirements: D3 (**one link per user**; if it fails the user just presses "retry" in the browser) and D4 (**progressive
-enhancement**; a download must always be *possible*; resume is best effort and restarting from zero is acceptable; proxy only on
+enhancement**; a download must always be _possible_; resume is best effort and restarting from zero is acceptable; proxy only on
 Cloudflare; managed download in v1). Research: [research/downloads.md](./research/downloads.md).
 
 **Scope (D-021).**
+
 - **v0:** Tier 0. `link()` gives a plain `<a href>` that works with no JS and every browser, using `'redirect'` on any storage
   and `'proxy'` only with the Cloudflare adapter (Worker + R2 binding).
 - **v1 (right after v0):** Tier 1. `download()` enhances that same link. When no sink fits (e.g. no OPFS quota left), it simply
@@ -304,16 +306,17 @@ Cloudflare; managed download in v1). Research: [research/downloads.md](./researc
 
 The resulting behaviour per case:
 
-| Case | Retry | Resume of an interrupted download |
-|---|---|---|
-| `redirect`, URL still valid | ✅ | ✅ (browser manager) |
-| `redirect`, URL expired | ✅ (re-click mints a new URL) | ❌ restarts from 0 (accepted) |
-| `proxy` (Cloudflare) | ✅ | ✅ wherever the browser manager resumes |
-| managed (v1), FS Access / OPFS | ✅ | ✅ chunk-level |
+| Case                           | Retry                         | Resume of an interrupted download       |
+| ------------------------------ | ----------------------------- | --------------------------------------- |
+| `redirect`, URL still valid    | ✅                            | ✅ (browser manager)                    |
+| `redirect`, URL expired        | ✅ (re-click mints a new URL) | ❌ restarts from 0 (accepted)           |
+| `proxy` (Cloudflare)           | ✅                            | ✅ wherever the browser manager resumes |
+| managed (v1), FS Access / OPFS | ✅                            | ✅ chunk-level                          |
 
 **Tier 0: native download manager (default).** `client.media.download.link({ input })` returns a **stable** URL,
 `GET {base}/media/download?mediaId=…`. It is per-user because each hit re-runs `resolve` with the app's own session/cookie.
 For links shared without a session, the server can mint a sealed, expiring link instead (`/l/{linkTicket}`).
+
 - `delivery: 'redirect'` (default, zero infra): the server replies 302 to a fresh presigned GET (`versionId` pinned,
   `response-content-disposition`, **`Range` never signed**).
   - Retry always works, because a re-click hits the stable link again.
@@ -325,6 +328,7 @@ For links shared without a session, the server can mint a sealed, expiring link 
   - It needs `StorageAdapter.getObject`. On other storages `'proxy'` is a startup error rather than a silent fallback.
 
 **Tier 1: managed download (opt-in, v1).** `client.media.download.download({ input, sink: 'auto' })`:
+
 - fetches `Range` chunks in parallel in a worker, with an `If-Match`/`If-Range` validator. A `200` received where `206` was
   expected means the object changed, so the download restarts and never appends;
 - re-resolves on 403 and persists progress per chunk;
@@ -339,15 +343,15 @@ Tier 1 when the app needs progress UI, parallel speed, integrity checks, or clie
 
 **Multiple files:** one link per file by default. A client-side streamed zip (STORE + Zip64, exact length) is possible later, but it is not resumable.
 
-| | Multipart upload | Ranged download |
-|---|---|---|
-| Server state | multipart upload id in storage (billed while incomplete) | none |
-| Unit | numbered parts, fixed plan, ≥ 5 MiB (except last) | arbitrary byte ranges |
-| Consistency | uploadId + per-part checksums + plan in ticket | ETag / versionId validators |
-| Finish | explicit `complete` (atomic object creation) | nothing to complete |
-| Cancel | `abort` needed (cost) | just stop |
-| Resume state | storage (ListParts) + client record | client sink only |
-| Integrity | per-part checksums verified by storage | object checksum (`x-amz-checksum-mode`) / per-part GET optional |
+|              | Multipart upload                                         | Ranged download                                                 |
+| ------------ | -------------------------------------------------------- | --------------------------------------------------------------- |
+| Server state | multipart upload id in storage (billed while incomplete) | none                                                            |
+| Unit         | numbered parts, fixed plan, ≥ 5 MiB (except last)        | arbitrary byte ranges                                           |
+| Consistency  | uploadId + per-part checksums + plan in ticket           | ETag / versionId validators                                     |
+| Finish       | explicit `complete` (atomic object creation)             | nothing to complete                                             |
+| Cancel       | `abort` needed (cost)                                    | just stop                                                       |
+| Resume state | storage (ListParts) + client record                      | client sink only                                                |
+| Integrity    | per-part checksums verified by storage                   | object checksum (`x-amz-checksum-mode`) / per-part GET optional |
 
 ## 15. Security considerations
 

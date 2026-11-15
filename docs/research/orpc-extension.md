@@ -12,16 +12,16 @@
 
 ## oRPC v2 extension mechanisms
 
-| Mechanism | Allows | Source |
-|---|---|---|
-| Handler plugins (`StandardHandlerPlugin`) | Server request handling: CORS, Batch, headers, limits, timeout | <https://orpc.dev/docs/plugins> |
-| Link plugins and interceptors | Client-side retry, dedupe, batch, timeout | <https://orpc.dev/docs/client/client-side> |
-| Middleware | Typed context, with access to `procedure` and `path` | <https://orpc.dev/docs/middleware> |
-| Meta plugins (`defineMeta`) | Typed per-procedure metadata. Our file rules and resume policy could travel this way. | <https://orpc.dev/docs/metadata> |
+| Mechanism                                                                     | Allows                                                                                                                               | Source                                                  |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| Handler plugins (`StandardHandlerPlugin`)                                     | Server request handling: CORS, Batch, headers, limits, timeout                                                                       | <https://orpc.dev/docs/plugins>                         |
+| Link plugins and interceptors                                                 | Client-side retry, dedupe, batch, timeout                                                                                            | <https://orpc.dev/docs/client/client-side>              |
+| Middleware                                                                    | Typed context, with access to `procedure` and `path`                                                                                 | <https://orpc.dev/docs/middleware>                      |
+| Meta plugins (`defineMeta`)                                                   | Typed per-procedure metadata. Our file rules and resume policy could travel this way.                                                | <https://orpc.dev/docs/metadata>                        |
 | "Extensions" (side-effect import patching a prototype, plus `declare module`) | Add builder methods (`.route()`, `.effect()`). Only used by first-party packages; not documented for third parties **[unverified]**. | <https://orpc.dev/docs/openapi/routing#route-extension> |
-| Integration packages wrapping the user's client | e.g. `createTanstackQueryUtils(client)` | <https://orpc.dev/docs/integrations/tanstack-query> |
+| Integration packages wrapping the user's client                               | e.g. `createTanstackQueryUtils(client)`                                                                                              | <https://orpc.dev/docs/integrations/tanstack-query>     |
 
-- **No new procedure *kind*.** `RouterContract = AnyProcedureContract | { [k]: RouterContract }`, so `oc.upload()` can't exist as a first-class kind.
+- **No new procedure _kind_.** `RouterContract = AnyProcedureContract | { [k]: RouterContract }`, so `oc.upload()` can't exist as a first-class kind.
 - **One entry → several procedures.** Possible as a plain nested router `{ init, sign, status, complete, abort }`.
 - **Native `File` / `Blob` support** sends the bytes **through your server** in a single request, with `TmpFileUploadHandlerPlugin` spooling them to disk. That is the opposite of resumable direct-to-bucket multipart (<https://orpc.dev/docs/binary-data>).
 - **Upstream:** issue #482 ("Better File Upload… TUS") is still open. The maintainer has said "could be implemented as a plugin" (<https://github.com/middleapi/orpc/issues/482>).
@@ -32,13 +32,13 @@
 
 ## Options
 
-| | A. Standalone (current draft) | B. oRPC-native only | C. Standalone core + optional `orpc` adapter |
-|---|---|---|---|
-| Users who don't use oRPC | ✅ | ❌ excluded | ✅ |
-| DX for oRPC users | Two routers and two middleware stacks | ✅ one router, reuse auth middleware, OpenAPI and plugins | ✅ same as B |
-| Coupling and version risk | None | High (v2 is still beta, wire format changed) | Contained to the adapter |
-| Typing | Full control | Generic over oRPC implementer internals **[stability unverified]** | Full control in the core; adapter is a thin mapping |
-| Stateful client engine | Ours | Ours (oRPC only carries the small JSON control calls; bytes go XHR → bucket) | Ours, through a `ControlTransport` interface |
+|                           | A. Standalone (current draft)         | B. oRPC-native only                                                          | C. Standalone core + optional `orpc` adapter        |
+| ------------------------- | ------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------- |
+| Users who don't use oRPC  | ✅                                    | ❌ excluded                                                                  | ✅                                                  |
+| DX for oRPC users         | Two routers and two middleware stacks | ✅ one router, reuse auth middleware, OpenAPI and plugins                    | ✅ same as B                                        |
+| Coupling and version risk | None                                  | High (v2 is still beta, wire format changed)                                 | Contained to the adapter                            |
+| Typing                    | Full control                          | Generic over oRPC implementer internals **[stability unverified]**           | Full control in the core; adapter is a thin mapping |
+| Stateful client engine    | Ours                                  | Ours (oRPC only carries the small JSON control calls; bytes go XHR → bucket) | Ours, through a `ControlTransport` interface        |
 
 Sketch for B/C, using only public oRPC APIs:
 
@@ -65,4 +65,4 @@ const up = createUploader(orpcClient.media.avatar, { store: indexedDBStore() })
 2. **Ship an `orpc` adapter (~200 LOC) once oRPC v2 is stable,** with peer dependency `^2`. Until then, provide a docs recipe.
 3. **Don't patch oRPC prototypes** to get `oc.upload()`. A plain `uploadContract({...})` function gives the same result.
 
-A reviewer's note to weigh: if oRPC users get real middleware through the adapter, the standalone core could ship a *smaller* middleware/context system than the draft. This is a trade-off between core size and standalone DX, and it is still open.
+A reviewer's note to weigh: if oRPC users get real middleware through the adapter, the standalone core could ship a _smaller_ middleware/context system than the draft. This is a trade-off between core size and standalone DX, and it is still open.

@@ -6,6 +6,7 @@
 ## The future demonstrator
 
 A public, free transfer service, in the spirit of SwissTransfer or GrosFichiers. Neither of those is E2EE today according to their public pages (see the research notes). It would add:
+
 - encryption in the browser before upload
 - resumable multipart upload
 - a link carrying the key in the URL `#fragment`
@@ -13,16 +14,16 @@ A public, free transfer service, in the spirit of SwissTransfer or GrosFichiers.
 
 ## What it implies for the SDK core (to keep possible now)
 
-| Topic | Implication | Core hook |
-|---|---|---|
-| Chunking | Ciphertext segments must tile parts exactly. Parts are ≥ 5 MiB, and R2 needs equal parts. | Part plan computed from `storedSize(plainSize)`; part size = k × segment size |
-| Resume | Re-encrypting part *i* must give identical bytes. Re-encrypting **different** plaintext under the same key and nonce is catastrophic. | Deterministic transform `(partIndex, isLast, plain) → bytes`; identity check before any re-encryption |
-| Keys over days | The key must survive reloads without leaking. | Resume store able to hold non-extractable `CryptoKey` (structured clone) |
-| Identity | The server must never see plaintext hashes, which would allow confirmation-of-file attacks. | Opaque or keyed fingerprints; checksums computed over ciphertext |
-| Metadata | Name, type and true size are sensitive; the object size leaks length. | Encrypted metadata sidecar; object keys never derived from names; optional padding |
-| Ranges | Plaintext ranges must map to whole ciphertext segments; a short read is a retry, never EOF. | Range mapper in the download engine; `DownloadSink` after a decrypt transform |
-| Validation | The server cannot check content type or size semantics. | Server validates only stored sizes; content checks move to the client or are dropped |
-| Abuse | Firefox Send was shut down after malware and phishing abuse. | Demonstrator concerns (expiry, caps, report-with-link), not core |
+| Topic          | Implication                                                                                                                           | Core hook                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Chunking       | Ciphertext segments must tile parts exactly. Parts are ≥ 5 MiB, and R2 needs equal parts.                                             | Part plan computed from `storedSize(plainSize)`; part size = k × segment size                         |
+| Resume         | Re-encrypting part _i_ must give identical bytes. Re-encrypting **different** plaintext under the same key and nonce is catastrophic. | Deterministic transform `(partIndex, isLast, plain) → bytes`; identity check before any re-encryption |
+| Keys over days | The key must survive reloads without leaking.                                                                                         | Resume store able to hold non-extractable `CryptoKey` (structured clone)                              |
+| Identity       | The server must never see plaintext hashes, which would allow confirmation-of-file attacks.                                           | Opaque or keyed fingerprints; checksums computed over ciphertext                                      |
+| Metadata       | Name, type and true size are sensitive; the object size leaks length.                                                                 | Encrypted metadata sidecar; object keys never derived from names; optional padding                    |
+| Ranges         | Plaintext ranges must map to whole ciphertext segments; a short read is a retry, never EOF.                                           | Range mapper in the download engine; `DownloadSink` after a decrypt transform                         |
+| Validation     | The server cannot check content type or size semantics.                                                                               | Server validates only stored sizes; content checks move to the client or are dropped                  |
+| Abuse          | Firefox Send was shut down after malware and phishing abuse.                                                                          | Demonstrator concerns (expiry, caps, report-with-link), not core                                      |
 
 ## Candidate constructions (no home-made crypto)
 

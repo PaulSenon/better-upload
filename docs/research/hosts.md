@@ -40,14 +40,14 @@
 
 ## Other hosts
 
-| Host | Surface | Bytes go… | Notes |
-|---|---|---|---|
-| Strapi v5 | Provider `init(config) → { upload, uploadStream, delete, getSignedUrl?, isPrivate? }` | through Strapi | Presigned uploads only via community guides (<https://docs.strapi.io/cms/configurations/media-library-providers>) |
-| Directus | Storage drivers; tus (`TUS_ENABLED`, 10 MB chunks, 10 min inactivity expiry) | through the API **[unverified]** | <https://directus.com/docs/configuration/files> |
-| Sanity | `POST /assets/{images,files}/{dataset}`, hosted only | Sanity | We can't own the storage; integration = store our URL in a field (<https://www.sanity.io/docs/http-reference/assets>) |
-| Medusa v2 | File Module Provider: `upload`, `delete`, `getPresignedUploadUrl` / `getPresignedDownloadUrl`, `getDownloadStream` | one presigned PUT at most | <https://docs.medusajs.com/resources/references/file-provider-module> |
-| Keystone 6 | file/image `storage` config, `maxFileSize` 200 MiB | through the server **[unverified]** | <https://keystonejs.com/docs/config/config> |
-| Supabase Storage | tus endpoint, **6 MB chunks**, 24 h URLs, JWT + RLS | Supabase | Already resumable; we would only add a unified contract (<https://supabase.com/docs/guides/storage/uploads/resumable-uploads>) |
+| Host             | Surface                                                                                                            | Bytes go…                           | Notes                                                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Strapi v5        | Provider `init(config) → { upload, uploadStream, delete, getSignedUrl?, isPrivate? }`                              | through Strapi                      | Presigned uploads only via community guides (<https://docs.strapi.io/cms/configurations/media-library-providers>)              |
+| Directus         | Storage drivers; tus (`TUS_ENABLED`, 10 MB chunks, 10 min inactivity expiry)                                       | through the API **[unverified]**    | <https://directus.com/docs/configuration/files>                                                                                |
+| Sanity           | `POST /assets/{images,files}/{dataset}`, hosted only                                                               | Sanity                              | We can't own the storage; integration = store our URL in a field (<https://www.sanity.io/docs/http-reference/assets>)          |
+| Medusa v2        | File Module Provider: `upload`, `delete`, `getPresignedUploadUrl` / `getPresignedDownloadUrl`, `getDownloadStream` | one presigned PUT at most           | <https://docs.medusajs.com/resources/references/file-provider-module>                                                          |
+| Keystone 6       | file/image `storage` config, `maxFileSize` 200 MiB                                                                 | through the server **[unverified]** | <https://keystonejs.com/docs/config/config>                                                                                    |
+| Supabase Storage | tus endpoint, **6 MB chunks**, 24 h URLs, JWT + RLS                                                                | Supabase                            | Already resumable; we would only add a unified contract (<https://supabase.com/docs/guides/storage/uploads/resumable-uploads>) |
 
 ## Convex
 

@@ -7,12 +7,12 @@
 
 In a real app the pieces live in different places:
 
-| Concern | Payload example | Convex example |
-|---|---|---|
-| Auth | Payload `req.user` | `ctx.auth.getUserIdentity()` |
-| Bytes | S3 / R2 bucket | R2 / Bunny / S3 |
-| IDs, file names, URLs, DB records | Payload collection docs, `generateURL` | Convex tables |
-| "Upload in progress" tracking | optional draft doc | optional table |
+| Concern                           | Payload example                        | Convex example               |
+| --------------------------------- | -------------------------------------- | ---------------------------- |
+| Auth                              | Payload `req.user`                     | `ctx.auth.getUserIdentity()` |
+| Bytes                             | S3 / R2 bucket                         | R2 / Bunny / S3              |
+| IDs, file names, URLs, DB records | Payload collection docs, `generateURL` | Convex tables                |
+| "Upload in progress" tracking     | optional draft doc                     | optional table               |
 
 The SDK must **move the bytes reliably and own nothing else**.
 
@@ -20,15 +20,15 @@ The SDK must **move the bytes reliably and own nothing else**.
 
 Each host concern maps onto an existing SDK seam. None of them needs a DB port.
 
-| Host concern | SDK seam | Note |
-|---|---|---|
-| Who is the user | adapter `context(req)` → typed context, middleware | Whatever the host uses (Payload `req.user`, Convex identity, Better Auth…) |
-| May they upload this | `authorize({ context, input, files })` | Throw a typed error, or return server-only `meta` |
-| Object key / ID | `key({ meta, file, sessionId, input })` | Host-generated (e.g. Payload's `{prefix}/{uuid}/{filename}` scheme) |
-| Track in-progress uploads | `onInit({ ticket, session, context })` | Optional. The host stores the **portable ticket**. Resume anywhere with `endpoint.resume(file, { ticket })` |
-| Create the record | **inline**: `onComplete` creates it and returns typed `output`; **or commit**: the host verifies the **receipt** later | Both modes are available. See below |
-| Serve | download `resolve` → key, versionId, delivery mode | The host decides the URL scheme and access |
-| Delete / GC | host deletes via its own flow; `onAbort`; bucket lifecycle rule | No SDK janitor state |
+| Host concern              | SDK seam                                                                                                               | Note                                                                                                        |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Who is the user           | adapter `context(req)` → typed context, middleware                                                                     | Whatever the host uses (Payload `req.user`, Convex identity, Better Auth…)                                  |
+| May they upload this      | `authorize({ context, input, files })`                                                                                 | Throw a typed error, or return server-only `meta`                                                           |
+| Object key / ID           | `key({ meta, file, sessionId, input })`                                                                                | Host-generated (e.g. Payload's `{prefix}/{uuid}/{filename}` scheme)                                         |
+| Track in-progress uploads | `onInit({ ticket, session, context })`                                                                                 | Optional. The host stores the **portable ticket**. Resume anywhere with `endpoint.resume(file, { ticket })` |
+| Create the record         | **inline**: `onComplete` creates it and returns typed `output`; **or commit**: the host verifies the **receipt** later | Both modes are available. See below                                                                         |
+| Serve                     | download `resolve` → key, versionId, delivery mode                                                                     | The host decides the URL scheme and access                                                                  |
+| Delete / GC               | host deletes via its own flow; `onAbort`; bucket lifecycle rule                                                        | No SDK janitor state                                                                                        |
 
 ### Two ways to create the host record
 
@@ -46,6 +46,7 @@ Each host concern maps onto an existing SDK seam. None of them needs a DB port.
 ### Payload CMS: compatible, with a docs page (D-033)
 
 **Status check (2026-11-15).** The owner remembered native support landing. It hasn't shipped yet, but it is close:
+
 - Payload team PR [#19325](https://github.com/payloadcms/payload/pull/19325) "feat(storage-s3): resumable upload sessions" was
   **approved** on 2026-11-12. It targets `main`, which is the v4 line (v4.0.0-beta.9, 2026-11-13). The latest stable is 3.93.0,
   which does not include it.
@@ -60,6 +61,7 @@ Each host concern maps onto an existing SDK seam. None of them needs a DB port.
   [#19076](https://github.com/payloadcms/payload/pull/19076).
 
 **Our stance.** Don't build a competing admin plugin. Instead:
+
 1. **v0: a docs page, "Use with Payload".** Mount the SDK router as Payload custom endpoints:
    - the context comes from `req.user`;
    - `authorize` reuses the collection's `create` access;
@@ -76,6 +78,7 @@ Each host concern maps onto an existing SDK seam. None of them needs a DB port.
    only make sense for providers or features that Payload lacks.
 
 Caveats for the docs page:
+
 - Large-file collections must avoid `imageSizes` and mime sniffing, otherwise Payload re-downloads the object.
 - Payload's own receipt helpers are in `payload/internal`, which is not public, so we mint our own.
 
@@ -84,11 +87,13 @@ Caveats for the docs page:
 Owner goal: "like ConvexFS, but not tied to Bunny.net: multi-provider, with multipart upload and resilience."
 
 **Convex constraints that shape the design** (see [research/hosts.md](./research/hosts.md)):
+
 - Mutations can't make network calls; actions and HTTP actions can.
 - Components have sandboxed tables and **can't read environment variables**.
 - Documents are capped at 1 MiB.
 
 Hence:
+
 - The **storage credentials and S3 calls stay in app code.** An app-level HTTP action runs our Fetch handler.
 - The **component holds only data and functions**: tables plus queries and mutations.
 - Bytes never touch Convex.
@@ -100,44 +105,46 @@ app.use(uploads);
 
 // convex/uploads.ts: app code, so it can read env and owns the credentials
 export const uploads = new Uploads(components.uploads, {
-  router,                                   // the same contract + router as on any other host
-  storage: s3Storage({ preset: 'r2', bucket: 'media', /* keys from process.env */ }),
+  router, // the same contract + router as on any other host
+  storage: s3Storage({ preset: 'r2', bucket: 'media' /* keys from process.env */ }),
   context: async (ctx) => ({ user: await ctx.auth.getUserIdentity() }),
 });
 
 // convex/http.ts
-uploads.registerRoutes(http, { pathPrefix: '/api/upload/' });   // init/sign/status/complete/abort + download links
+uploads.registerRoutes(http, { pathPrefix: '/api/upload/' }); // init/sign/status/complete/abort + download links
 
 // reactive queries for the UI, across devices
 export const myPending = query({ handler: (ctx) => uploads.listPending(ctx, { owner: '…' }) });
 ```
 
 **Component tables (like ConvexFS):**
+
 - `uploads`: `sessionId`, `endpoint`, `owner`, sealed `ticket`, file descriptor, `status`
   (`pending | completed | aborted | expired`), `expiresAt`.
   - Written only at init, complete and abort: never per part, so writes stay cheap.
   - Upload progress stays on the client.
   - This is exactly the "host persists the ticket" path of D-005, which gives **cross-device resume and pending lists out of the box**.
-  - The core SDK still has no DB. In a Convex app, Convex *is* the host's DB.
+  - The core SDK still has no DB. In a Convex app, Convex _is_ the host's DB.
 - `files` (optional): `key`, `size`, `contentType`, `checksum`, `owner`, `sessionId`. For apps that want a ConvexFS-like file
   table instead of their own `onComplete` record.
 
 **Compared with ConvexFS:**
 
-| | ConvexFS 0.3 | Our component (proposal) |
-|---|---|---|
-| Providers | Bunny.net only | Any S3-compatible (R2, AWS, B2, Tigris, MinIO…). Bunny later if its S3 API fits **[unverified]** |
-| Upload path | proxied through an HTTP action | direct browser → bucket, presigned multipart |
-| Resume | ✗ | ✓ over days, re-selected file verified (D-007), cross-device through the `uploads` table |
-| Commit | `commitFiles` within a 4 h TTL | inline `onComplete` (mutation), or receipt + `verifyReceipt` inside the host's mutation |
-| Auth hook | `uploadAuth → { allowed, maxBytes }` | `authorize` (typed `input`, typed errors, server `meta`) |
-| Downloads | 302 to a 1 h signed CDN URL | stable link → 302 to a fresh presigned URL; Cloudflare proxy optional |
-| GC | soft delete, ref-counted blobs, cron | app cron → `uploads.sweep(ctx)` action (abort expired multipart, optional orphan delete). Ref-counted dedup out of scope for v0 |
+|             | ConvexFS 0.3                         | Our component (proposal)                                                                                                        |
+| ----------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Providers   | Bunny.net only                       | Any S3-compatible (R2, AWS, B2, Tigris, MinIO…). Bunny later if its S3 API fits **[unverified]**                                |
+| Upload path | proxied through an HTTP action       | direct browser → bucket, presigned multipart                                                                                    |
+| Resume      | ✗                                    | ✓ over days, re-selected file verified (D-007), cross-device through the `uploads` table                                        |
+| Commit      | `commitFiles` within a 4 h TTL       | inline `onComplete` (mutation), or receipt + `verifyReceipt` inside the host's mutation                                         |
+| Auth hook   | `uploadAuth → { allowed, maxBytes }` | `authorize` (typed `input`, typed errors, server `meta`)                                                                        |
+| Downloads   | 302 to a 1 h signed CDN URL          | stable link → 302 to a fresh presigned URL; Cloudflare proxy optional                                                           |
+| GC          | soft delete, ref-counted blobs, cron | app cron → `uploads.sweep(ctx)` action (abort expired multipart, optional orphan delete). Ref-counted dedup out of scope for v0 |
 
 Inspiration to study before implementing: ConvexFS, the Better Auth component, the Stripe component, `@convex-dev/r2`
 and other well-made components (table layout, `registerRoutes`, client class wrapping `components.x`, testing).
 
 Open points:
+
 - Is ConvexFS-style path/ref-count file management in scope (later)?
 - Can components register crons **[unverified]**, or does the sweep stay app-side?
 

@@ -1,16 +1,36 @@
 {
-  "name": "better-upload-design",
+  "name": "upload-sdk-monorepo",
   "private": true,
-  "description": "DESIGN PHASE ONLY — specification, README draft and TypeScript interfaces. No runtime implementation.",
+  "description": "Type-safe, resumable uploads and downloads to your own S3-compatible storage. Name is provisional.",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@10.33.3",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "turbo run build --filter=./packages/*",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "pnpm --filter @bu-draft/integration-tests test",
+    "test:e2e": "pnpm --filter @bu-draft/e2e test",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "check:packages": "turbo run check:package --filter=./packages/*",
+    "minio:up": "docker compose -f tests/docker-compose.yml up -d --wait",
+    "minio:down": "docker compose -f tests/docker-compose.yml down -v",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
-    "@types/node": "^22.20.5",
-    "@types/react": "^19.3.0",
-    "typescript": "^5.9.3",
-    "zod": "^4.6.7"
+    "@biomejs/biome": "2.6.7",
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "3.0.3",
+    "@types/node": "catalog:",
+    "turbo": "2.11.11",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }
