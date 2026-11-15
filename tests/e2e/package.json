@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx --conditions=source server.ts",
-    "test": "playwright test",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

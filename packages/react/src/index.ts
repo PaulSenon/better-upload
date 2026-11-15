@@ -216,6 +216,7 @@ export function usePendingUploads<T extends ContractRouter>(
       [all],
     ),
   );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `statuses` changes when any task changes status.
   return useMemo(() => all.filter((t) => t.getSnapshot().status === 'needs-file'), [all, statuses]);
 }
 
