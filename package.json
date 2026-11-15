@@ -21,7 +21,7 @@
     "minio:down": "docker compose -f tests/docker-compose.yml down -v",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm build && changeset publish"
+    "release": "pnpm build && node scripts/publish.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",

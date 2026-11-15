@@ -32,10 +32,12 @@ jobs:
         with: { node-version: 24, cache: pnpm, registry-url: "https://registry.npmjs.org" }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build && pnpm check:packages
+      # npm >= 11.5.1 publishes with OIDC trusted publishing (no token).
+      - run: npm install -g npm@11
       - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           version: pnpm version-packages
-          publish: pnpm changeset publish
+          publish: node scripts/publish.mjs
           title: "chore: version packages"
           commit: "chore: version packages"
         env:

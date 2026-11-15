@@ -1,5 +1,7 @@
 # Operations: CI, releases, deployments
 
+> **Step-by-step go-live guide (French): [RUNBOOK.fr.md](./RUNBOOK.fr.md).** This page is the reference.
+
 Everything automated is already in `.github/workflows/`. What is left needs accounts and secrets only the owner can
 create. Each part is **off by default** and switches on with a repository variable.
 

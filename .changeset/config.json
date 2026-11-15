@@ -1,11 +1,29 @@
 {
   "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
-  "changelog": ["@changesets/changelog-github", { "repo": "PaulSenon/better-upload" }],
+  "changelog": [
+    "@changesets/changelog-github",
+    {
+      "repo": "PaulSenon/better-upload"
+    }
+  ],
   "commit": false,
-  "fixed": [["@open-upload/*"]],
+  "fixed": [
+    [
+      "@open-upload/core",
+      "@open-upload/s3",
+      "@open-upload/server",
+      "@open-upload/client",
+      "@open-upload/react",
+      "@open-upload/convex"
+    ]
+  ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": []
+  "ignore": [],
+  "privatePackages": {
+    "version": false,
+    "tag": false
+  }
 }
