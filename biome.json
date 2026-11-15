@@ -9,6 +9,7 @@
       "!**/.tanstack",
       "!**/.source",
       "!**/routeTree.gen.ts",
+      "!**/_generated",
       "!**/public/r",
       "!**/test-results",
       "!**/playwright-report",
