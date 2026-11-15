@@ -17,6 +17,7 @@ import type {
   UploadContract,
   UploadErrorShape,
 } from '@open-upload/core';
+import type { DownloadTask, ManagedDownloadOptions } from './download.js';
 
 // ---------------------------------------------------------------------------
 // Task state machine
@@ -238,6 +239,14 @@ export interface DownloadEndpointClient<C extends DownloadContract<any>> {
   resolve(
     ...options: OptionalArg<InputArg<InferDownloadInput<C>> & { readonly signal?: AbortSignal }>
   ): Promise<ResolveResponse>;
+  /**
+   * Managed download (progressive enhancement over {@link link}): parallel ranged requests with retries, re-signing
+   * and pause/resume, written to the best available sink (File System Access → OPFS → memory). Falls back to the
+   * browser's own download manager when no sink fits. Call it from a click handler (the save dialog needs it).
+   */
+  download(
+    ...options: OptionalArg<InputArg<InferDownloadInput<C>> & ManagedDownloadOptions>
+  ): DownloadTask<EndpointError_<C>>;
   readonly path: string;
 }
 
@@ -278,6 +287,8 @@ export interface UploadClientOptions<T extends ContractRouter> {
   readonly transport?: Transport;
   /** `fetch` used for calls to your server. */
   readonly fetch?: typeof fetch;
+  /** `fetch` used for ranged GETs to the storage (managed downloads). Default: global fetch. */
+  readonly storageFetch?: typeof fetch;
   readonly retry?: Partial<RetryPolicy>;
   readonly concurrency?: Partial<ConcurrencyPolicy>;
   /** Default 30 s without progress before a part request is retried. */

@@ -16,6 +16,8 @@ export interface FaultConfig {
   parts?: number[];
   /** Block every matching PUT (hang until the client gives up / aborts). */
   block?: boolean;
+  /** Methods to fault. Default `['PUT']` (part uploads). Add `'GET'` for ranged downloads. */
+  methods?: string[];
 }
 
 export interface ProxyLog {
@@ -34,7 +36,9 @@ export function startFaultProxy(options: { port: number; target: { host: string;
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://proxy');
     const partNumber = url.searchParams.has('partNumber') ? Number(url.searchParams.get('partNumber')) : null;
-    const isUpload = req.method === 'PUT' && (partNumber !== null || url.searchParams.has('X-Amz-Signature'));
+    const methods = config.methods ?? ['PUT'];
+    const isUpload =
+      methods.includes(req.method ?? '') && (partNumber !== null || url.searchParams.has('X-Amz-Signature'));
     const entry: ProxyLog = {
       method: req.method ?? '',
       partNumber,
@@ -42,7 +46,7 @@ export function startFaultProxy(options: { port: number; target: { host: string;
       status: 0,
       faulted: null,
     };
-    if (req.method === 'PUT') log.push(entry);
+    if (req.method === 'PUT' || req.method === 'GET') log.push(entry);
     const eligible =
       isUpload &&
       config.mode !== 'none' &&
@@ -53,6 +57,34 @@ export function startFaultProxy(options: { port: number; target: { host: string;
     if (isUpload && config.block) {
       entry.faulted = 'block';
       req.on('close', () => res.destroy());
+      return;
+    }
+    if (eligible && config.mode === 'reset' && req.method === 'GET') {
+      faultedCount++;
+      entry.faulted = 'reset';
+      const upstream = http.request(
+        {
+          host: options.target.host,
+          port: options.target.port,
+          method: req.method,
+          path: req.url,
+          headers: req.headers,
+        },
+        (up) => {
+          res.writeHead(up.statusCode ?? 502, up.headers);
+          let sent = 0;
+          up.on('data', (chunk: Buffer) => {
+            sent += chunk.length;
+            if (sent > 512 * 1024) {
+              res.destroy();
+              up.destroy();
+            } else res.write(chunk);
+          });
+          up.on('end', () => res.end());
+        },
+      );
+      upstream.on('error', () => res.destroy());
+      req.pipe(upstream);
       return;
     }
     if (eligible && config.mode === 'reset') {

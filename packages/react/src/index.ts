@@ -1,4 +1,7 @@
 import type {
+  DownloadEndpointClient,
+  DownloadSnapshot,
+  DownloadTask,
   EndpointUploadTask,
   ReadableStore,
   UploadableFile,
@@ -9,7 +12,14 @@ import type {
   UploadSnapshot,
   UploadTask,
 } from '@open-upload/client';
-import type { BuiltinError, ContractRouter, EndpointError, FileRules, UploadErrorShape } from '@open-upload/core';
+import type {
+  BuiltinError,
+  ContractRouter,
+  DownloadContract,
+  EndpointError,
+  FileRules,
+  UploadErrorShape,
+} from '@open-upload/core';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 type AnyTask = UploadTask<any, any>;
@@ -218,6 +228,29 @@ export function usePendingUploads<T extends ContractRouter>(
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: `statuses` changes when any task changes status.
   return useMemo(() => all.filter((t) => t.getSnapshot().status === 'needs-file'), [all, statuses]);
+}
+
+/** Snapshot of a managed download task (`endpoint.download(...)`), `undefined` while there is none. */
+export function useDownloadTask(task: DownloadTask<any> | undefined): DownloadSnapshot<any> | undefined {
+  return useStore((task ?? noopStore) as ReadableStore<DownloadSnapshot<any> | undefined>);
+}
+
+/**
+ * Managed download state for one endpoint. `start()` must be called from a click handler (the save dialog needs the
+ * user gesture). Without a managed sink available, it hands the stable link to the browser.
+ */
+export function useDownload<C extends DownloadContract<any>>(endpoint: DownloadEndpointClient<C>) {
+  const [task, setTask] = useState<DownloadTask<any>>();
+  const snapshot = useDownloadTask(task);
+  const start = useCallback(
+    (...options: Parameters<DownloadEndpointClient<C>['download']>) => {
+      const created = endpoint.download(...options);
+      setTask(created);
+      return created;
+    },
+    [endpoint],
+  );
+  return { start, task, snapshot } as const;
 }
 
 function isFileLike(value: unknown): value is UploadableFile {

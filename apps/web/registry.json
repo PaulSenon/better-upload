@@ -42,14 +42,19 @@
       "name": "download-button",
       "type": "registry:component",
       "title": "Download button",
-      "description": "A stable, re-authorized download link handed to the browser's own download manager.",
-      "dependencies": ["lucide-react"],
-      "registryDependencies": ["button"],
+      "description": "A stable, re-authorized download link for the browser's own download manager, optionally enhanced into a managed download with progress, pause and resume.",
+      "dependencies": ["@open-upload/client", "@open-upload/react", "lucide-react"],
+      "registryDependencies": ["button", "progress"],
       "files": [
         {
           "path": "src/components/upload/download-button.tsx",
           "type": "registry:component",
           "target": "components/upload/download-button.tsx"
+        },
+        {
+          "path": "src/components/upload/format.ts",
+          "type": "registry:component",
+          "target": "components/upload/format.ts"
         }
       ]
     }

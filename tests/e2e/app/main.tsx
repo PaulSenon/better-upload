@@ -1,6 +1,6 @@
 import { createUploadClient } from '@open-upload/client';
-import { usePendingUploads, useStore, useUpload, useUploadTask } from '@open-upload/react';
-import { StrictMode } from 'react';
+import { useDownload, usePendingUploads, useStore, useUpload, useUploadTask } from '@open-upload/react';
+import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { contract } from '../contract.ts';
 
@@ -53,11 +53,47 @@ function TaskRow({ task }: { task: ReturnType<typeof client.videos.upload> }) {
         cancel
       </button>
       {s.output ? (
-        <a data-testid="download" href={client.files.get.link({ input: { key: s.output.key } })} download>
-          download
-        </a>
+        <>
+          <a data-testid="download" href={client.files.get.link({ input: { key: s.output.key } })} download>
+            download
+          </a>
+          <ManagedDownload objectKey={s.output.key} />
+        </>
       ) : null}
     </li>
+  );
+}
+
+function ManagedDownload({ objectKey }: { objectKey: string }) {
+  const { start, task, snapshot } = useDownload(client.files.get);
+  const [digest, setDigest] = useState('');
+  return (
+    <span
+      data-testid="managed"
+      data-status={snapshot?.status ?? ''}
+      data-sink={snapshot?.sink ?? ''}
+      data-sha256={digest}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          const t = start({
+            input: { key: objectKey },
+            sink: (params.get('sink') as 'memory' | 'opfs') ?? 'memory',
+            save: false,
+            chunkSize: 4 * 1024 * 1024,
+          });
+          t.result.then(async (blob) => {
+            if (!blob) return;
+            const d = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+            setDigest([...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join(''));
+          });
+        }}
+      >
+        managed download
+      </button>
+      {task && snapshot ? ` ${snapshot.status} ${Math.round(snapshot.fraction * 100)}%` : null}
+    </span>
   );
 }
 

@@ -165,6 +165,19 @@ export function memoryStorage(options: { capabilities?: Partial<StorageCapabilit
       if (method === 'GET') {
         const entry = objects.get(key);
         if (!entry) return new Response('<Error><Code>NoSuchKey</Code></Error>', { status: 404 });
+        const ifMatch = headers.get('if-match');
+        if (ifMatch && ifMatch !== entry.object.etag) {
+          return new Response('<Error><Code>PreconditionFailed</Code></Error>', { status: 412 });
+        }
+        const range = /^bytes=(\d+)-(\d*)$/.exec(headers.get('range') ?? '');
+        if (range) {
+          const start = Number(range[1]);
+          const end = range[2] ? Math.min(Number(range[2]) + 1, entry.body.length) : entry.body.length;
+          return new Response(entry.body.slice(start, end) as Uint8Array<ArrayBuffer>, {
+            status: 206,
+            headers: { etag: entry.object.etag, 'content-range': `bytes ${start}-${end - 1}/${entry.body.length}` },
+          });
+        }
         return new Response(entry.body as Uint8Array<ArrayBuffer>, {
           status: 200,
           headers: { etag: entry.object.etag },

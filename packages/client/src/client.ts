@@ -12,6 +12,7 @@ import {
   type UploadContract,
 } from '@open-upload/core';
 import { createControlTransport } from './control.js';
+import { type ManagedDownloadOptions, startDownload } from './download.js';
 import { createNetworkMonitor } from './network.js';
 import { defaultStore } from './persistence.js';
 import { describeFile, type EngineDeps, type TaskSource, UploadTaskImpl } from './task.js';
@@ -204,6 +205,11 @@ export function createUploadClient<T extends ContractRouter>(options: UploadClie
       link: (opts?: { input?: unknown }) => `${baseUrl}/${path}${encodeLinkInput(opts?.input)}`,
       resolve: (opts?: { input?: unknown; signal?: AbortSignal }) =>
         control.call<ResolveResponse>(path, 'resolve', { input: opts?.input }, opts?.signal),
+      download: (opts: { input?: unknown } & ManagedDownloadOptions = {}) =>
+        startDownload(
+          { control, network, retry: deps.retry, fetch: options.storageFetch ?? globalThis.fetch.bind(globalThis) },
+          { ...opts, path, input: opts.input, link: `${baseUrl}/${path}${encodeLinkInput(opts.input)}` },
+        ),
     };
   }
 
@@ -263,39 +269,50 @@ export function createUploadClient<T extends ContractRouter>(options: UploadClie
   };
 
   const cache = new Map<string, unknown>();
+  const UPLOAD_METHODS = new Set(['upload', 'uploadMany', 'resume', 'pending', 'validate']);
+  const DOWNLOAD_METHODS = new Set(['link', 'resolve', 'download']);
   const node = (path: string): any => {
     const cached = cache.get(path);
     if (cached) return cached;
+    let proxy: any;
     const known = endpoints?.get(path);
-    let target: any = {};
-    if (known) target = isUploadContract(known) ? uploadEndpoint(path) : downloadEndpoint(path);
-    const proxy = new Proxy(target, {
-      get(obj, prop) {
-        if (typeof prop !== 'string') return undefined;
-        if (prop in obj) return obj[prop];
-        if (!known) {
-          // Without the contract value, the endpoint kind is inferred from the method called.
-          if (
-            prop === 'upload' ||
-            prop === 'uploadMany' ||
-            prop === 'resume' ||
-            prop === 'pending' ||
-            prop === 'validate' ||
-            prop === 'rules' ||
-            prop === 'accept'
-          ) {
-            Object.assign(obj, uploadEndpoint(path));
-            return obj[prop];
-          }
-          if (prop === 'link' || prop === 'resolve') {
-            Object.assign(obj, downloadEndpoint(path));
-            return obj[prop];
-          }
-        }
-        if (prop === 'then') return undefined;
-        return node(path ? `${path}/${prop}` : prop);
-      },
-    });
+    if (endpoints) {
+      // Contract value given: the tree is known exactly.
+      const target: any = known ? (isUploadContract(known) ? uploadEndpoint(path) : downloadEndpoint(path)) : {};
+      proxy = new Proxy(target, {
+        get(obj, prop) {
+          if (typeof prop !== 'string' || prop === 'then') return undefined;
+          if (known) return obj[prop];
+          return node(`${path}/${prop}`);
+        },
+      });
+    } else {
+      // Type only: a method name may also be a nested endpoint name (e.g. `files.download.link()`). Methods are
+      // returned as callable proxies: calling them runs the method, reading a property navigates further.
+      proxy = new Proxy(
+        {},
+        {
+          get(_, prop) {
+            if (typeof prop !== 'string' || prop === 'then') return undefined;
+            const child = path ? `${path}/${prop}` : prop;
+            if (UPLOAD_METHODS.has(prop) || DOWNLOAD_METHODS.has(prop)) {
+              const method = (...args: unknown[]) =>
+                (UPLOAD_METHODS.has(prop) ? uploadEndpoint(path) : (downloadEndpoint(path) as any))[prop](...args);
+              return new Proxy(method, {
+                get(fn, sub) {
+                  if (typeof sub !== 'string' || sub === 'then') return undefined;
+                  if (sub in fn) return (fn as any)[sub];
+                  return node(child)[sub];
+                },
+              });
+            }
+            if (prop === 'path') return path;
+            if (prop === 'rules' || prop === 'accept') return undefined;
+            return node(child);
+          },
+        },
+      );
+    }
     cache.set(path, proxy);
     return proxy;
   };
