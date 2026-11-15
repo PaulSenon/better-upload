@@ -1,0 +1,57 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "upload-sdk",
+  "homepage": "https://github.com/PaulSenon/better-upload",
+  "items": [
+    {
+      "name": "upload",
+      "type": "registry:block",
+      "title": "Upload",
+      "description": "Dropzone, upload list with progress and controls, and a banner to resume interrupted uploads. Headless engine from @bu-draft/react.",
+      "dependencies": ["@bu-draft/client", "@bu-draft/react", "lucide-react"],
+      "registryDependencies": ["button", "progress"],
+      "files": [
+        {
+          "path": "src/components/upload/upload-dropzone.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-dropzone.tsx"
+        },
+        {
+          "path": "src/components/upload/upload-item.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-item.tsx"
+        },
+        {
+          "path": "src/components/upload/upload-list.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-list.tsx"
+        },
+        {
+          "path": "src/components/upload/upload-resume-banner.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-resume-banner.tsx"
+        },
+        {
+          "path": "src/components/upload/format.ts",
+          "type": "registry:component",
+          "target": "components/upload/format.ts"
+        }
+      ]
+    },
+    {
+      "name": "download-button",
+      "type": "registry:component",
+      "title": "Download button",
+      "description": "A stable, re-authorized download link handed to the browser's own download manager.",
+      "dependencies": ["lucide-react"],
+      "registryDependencies": ["button"],
+      "files": [
+        {
+          "path": "src/components/upload/download-button.tsx",
+          "type": "registry:component",
+          "target": "components/upload/download-button.tsx"
+        }
+      ]
+    }
+  ]
+}

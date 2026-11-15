@@ -1,0 +1,54 @@
+---
+title: Client
+description: The typed client and the upload engine.
+icon: MonitorSmartphone
+---
+
+```ts
+const client = createUploadClient<typeof contract>({
+  baseUrl: '/api/upload',
+  contract,            // optional: client-side file validation and `accept`
+  headers: async () => ({ authorization: `Bearer ${await token()}` }), // calls to your server only
+});
+```
+
+Pass only the type (`createUploadClient<typeof contract>({ baseUrl })`) to keep the contract out of the bundle.
+
+## Endpoints
+
+| Method | |
+|---|---|
+| `client.videos.upload(file, { input })` | Starts an upload, or continues a matching unfinished one (verified first). Returns a task. |
+| `client.videos.uploadMany(files, { input })` | One request to your server for the whole batch, one task per file. |
+| `client.videos.resume(file, { ticket })` | Continues from a ticket your app stored (another device). |
+| `client.videos.pending()` | Unfinished uploads persisted on this device. |
+| `client.videos.validate(file)`, `.accept`, `.rules` | Client-side rules. |
+| `client.media.download.link({ input })` | Stable download link (no network call). |
+| `client.media.download.resolve({ input })` | Presigned request + object info now. |
+
+## Tasks
+
+A task is a small store (`subscribe` / `getSnapshot`) with `pause()`, `resume()`, `retry()`, `restart()`, `cancel()`,
+`attachFile(file)` and a typed `result` promise. `result` settles on `completed`, `canceled`, `expired` or a
+non-retryable failure; a retryable failure waits for `retry()`.
+
+| Status | Meaning |
+|---|---|
+| `preparing` / `initializing` | Reading or verifying the file; asking your server. |
+| `uploading` | Sending parts. `progress.bytesPerSecond` and `etaMs` once measurable. |
+| `retrying` / `waiting-network` | Backing off after an error / offline: continues by itself. |
+| `paused` | `task.pause()`. |
+| `needs-file` | Restored after a reload: the user must select the file again. |
+| `failed` | Stopped on an error. `error.retryable` → `task.retry()`. |
+| `expired` | Nothing left to resume. Tell the user; `task.restart()` starts from 0 %. |
+| `completed` | `output` and `receipt` are set. |
+
+## Engine defaults
+
+- 8 MiB parts, equal-sized (Cloudflare R2 requirement), up to 10,000 parts.
+- CRC32C per part, computed in 1 MiB slices (pure TypeScript, about 1 GB/s on a laptop).
+- Adaptive concurrency: starts at 3, up to 6, halved on timeouts and throttling.
+- Retries with full-jitter exponential backoff (10 attempts per part, up to 30 s apart). Offline time costs nothing.
+- Stall detection: a part with no progress for 30 s is retried.
+- XHR in browsers (upload progress), fetch elsewhere. IndexedDB persistence (tickets only, never bytes).
+- Web Locks stop two tabs from uploading the same session.

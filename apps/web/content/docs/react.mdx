@@ -1,0 +1,36 @@
+---
+title: React
+description: Headless hooks over the client stores.
+icon: Atom
+---
+
+```tsx
+import { useUpload, usePendingUploads, useUploadTask } from '@bu-draft/react';
+
+function Uploader({ albumId }: { albumId: string }) {
+  const videos = useUpload(client.videos, { onCompleted: (output) => toast(`Saved ${output.mediaId}`) });
+  const control = videos.control({ input: { albumId } });
+  return (
+    <>
+      <input type="file" accept={control.accept} multiple={control.multiple} onChange={(e) => control.onFiles(e.target.files!)} />
+      <progress value={videos.progress} />
+      {videos.tasks.map((task) => <Row key={task.id} task={task} />)}
+    </>
+  );
+}
+
+function Row({ task }) {
+  const s = useUploadTask(task);
+  return <div>{s?.file.name}: {s?.status}</div>;
+}
+```
+
+| Hook | |
+|---|---|
+| `useUpload(endpoint, { onCompleted, onFailed })` | Tasks started by the component, aggregate `progress`, `isUploading`, `pauseAll` / `resumeAll` / `cancelAll` / `clearFinished`, and `control(options)` for dropzones. |
+| `useUploadTask(task)` | Live snapshot of one task. |
+| `usePendingUploads(client)` | Unfinished uploads to resume after a reload ("select the file again"). |
+| `useStore(store, selector?)` | Any SDK store, e.g. `client.$tasks`. |
+
+Prefer reading state from snapshots rather than local component state: rows unmount and remount while a re-selected
+file is checked, and the snapshot keeps the error.

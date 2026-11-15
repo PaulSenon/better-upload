@@ -1,0 +1,36 @@
+---
+title: Storage
+description: AWS S3, Cloudflare R2, MinIO and other S3-compatible services.
+icon: Database
+---
+
+```ts
+import { s3Storage } from '@bu-draft/s3';
+
+s3Storage({ preset: 'aws', region: 'eu-west-3', bucket: 'media', credentials });
+s3Storage({ preset: 'cloudflare-r2', accountId, bucket: 'media', credentials });
+s3Storage({ preset: 'minio', endpoint: 'http://localhost:9000', bucket: 'media', credentials });
+s3Storage({ endpoint: 'https://s3.example.com', bucket: 'media', credentials }); // generic, no checksums
+```
+
+The adapter signs requests itself (SigV4 on Web Crypto, verified against AWS's published examples), so it runs on
+Node, Bun, Deno, Cloudflare Workers and Convex without the AWS SDK.
+
+| Preset | Checksums | Incomplete uploads discarded by the provider |
+|---|---|---|
+| `aws` | CRC32C (default), CRC32, SHA-256, SHA-1 | never (billed until aborted: add the lifecycle rule) |
+| `cloudflare-r2` | CRC32C, CRC32, SHA-256, SHA-1 | after 7 days |
+| `minio` | CRC32C, CRC32, SHA-256, SHA-1 | after 24 hours (default) |
+| `generic` / `backblaze-b2` | none | unknown |
+
+The server keeps a session's lifetime below the provider's cleanup window. `credentials` can be a function returning
+temporary credentials (STS); presigned URL lifetimes are clamped to their expiry. `keyPrefix` confines every key to a prefix.
+
+Presigned PUTs sign `content-length` and the part checksum, so the browser cannot send a different size or different bytes.
+
+## Bucket setup
+
+The SDK never changes your bucket. `recommendedBucketConfig({ allowedOrigins, abortIncompleteAfterDays })` returns:
+
+- **CORS**: `PUT`, `GET`, `HEAD` from your origins, headers `content-type`, `x-amz-checksum-*`, `x-amz-meta-*`, `range`.
+- **Lifecycle**: abort incomplete multipart uploads after N days, so abandoned uploads stop costing money.

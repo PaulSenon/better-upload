@@ -1,0 +1,24 @@
+---
+title: Contract
+description: The single source of truth shared by server and client.
+icon: FileCode
+---
+
+A contract is a plain object tree of `uc.upload()` and `uc.download()` declarations. It holds rules and schemas, never a
+bucket, a credential or a framework, so it is safe to import in the browser.
+
+| Builder | Meaning |
+|---|---|
+| `.files({ accept, maxFileSize, minFileSize, maxFiles, maxTotalSize })` | Which files are accepted. Checked on the client (when the contract value is given) and always on the server. |
+| `.input(schema)` | Metadata the client sends (validated on the server). Makes `input` required on the client. |
+| `.output(schema)` | What `onUploadCompleted` returns to the client. |
+| `.errors({ CODE: { status, data, retryable, userAction } })` | Typed errors, received as a union on the client. |
+| `.resume({ ttl, verify })` / `.resume(false)` | How long an unfinished upload stays resumable and how a re-selected file is verified. |
+| `.integrity({ partChecksum })` | Per-part checksum verified by the storage (`'auto'` picks CRC32C on AWS and R2). |
+
+`accept` takes MIME types (`video/mp4`), wildcards (`image/*`) and extensions (`.heic`); extensions matter because
+browsers often report an empty type. Sizes accept numbers (bytes) or strings (`'10MiB'`, `'2GB'`).
+
+Nested objects namespace endpoints: `media.download` is served at `/media/download`.
+
+Any [Standard Schema](https://standardschema.dev) library works: Zod 4, Valibot, ArkType, Effect Schema.

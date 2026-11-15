@@ -1,0 +1,26 @@
+---
+title: CMS and backends
+description: The SDK moves bytes; your app owns the meaning.
+icon: Plug
+---
+
+Auth comes from your context factory; your hooks decide keys and IDs, write your records, and optionally store the
+portable ticket. Two ways to create the host record:
+
+1. **Inline**: `onUploadCompleted` writes the record and returns its id.
+2. **Receipt**: the client forwards `snapshot.receipt` to your normal create path, which calls
+   `uploads.verifyReceipt(receipt)` instead of trusting client claims.
+
+## Convex (planned)
+
+An official Convex component: multi-provider (any S3-compatible bucket), resumable multipart, and reactive pending
+uploads across devices. The upload server is a Fetch handler, so it mounts in a Convex HTTP action as is:
+
+```ts
+http.route({ pathPrefix: '/api/upload/', method: 'POST', handler: httpAction((ctx, req) => uploads.fetch(req, { convex: ctx })) });
+```
+
+## Payload CMS
+
+Payload is adding resumable S3 uploads to its admin in v4. For front-end uploads into Payload collections, mount the
+SDK as Payload endpoints and use receipt mode in a `beforeChange` hook. A dedicated guide will follow.

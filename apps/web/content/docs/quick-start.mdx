@@ -1,0 +1,109 @@
+---
+title: Quick start
+description: Four pieces — a contract, a bucket, a router, a client.
+icon: Rocket
+---
+
+## 1. Contract (shared, no secrets)
+
+```ts title="contract.ts"
+import { uc } from '@bu-draft/core';
+import { z } from 'zod'; // any Standard Schema library
+
+export const contract = uc.router({
+  avatar: uc.upload()
+    .files({ accept: ['image/*'], maxFileSize: '10MiB' })
+    .output(z.object({ url: z.string() })),
+
+  videos: uc.upload()
+    .files({ accept: ['video/*', '.mov'], maxFiles: 20 })
+    .input(z.object({ albumId: z.string() }))
+    .output(z.object({ mediaId: z.string() }))
+    .errors({ QUOTA_EXCEEDED: { status: 403, data: z.object({ remainingBytes: z.number() }) } })
+    .resume({ ttl: '7d' }),
+
+  media: { download: uc.download().input(z.object({ mediaId: z.string() })) },
+});
+```
+
+## 2. Bucket (server only)
+
+```ts title="storage.ts"
+import { s3Storage } from '@bu-draft/s3';
+
+export const storage = s3Storage({
+  preset: 'cloudflare-r2',
+  accountId: process.env.R2_ACCOUNT_ID!,
+  bucket: 'media',
+  credentials: { accessKeyId: process.env.R2_KEY_ID!, secretAccessKey: process.env.R2_SECRET! },
+});
+```
+
+## 3. Router (server)
+
+```ts title="uploads.ts"
+import { UploadError } from '@bu-draft/core';
+import { createUploadServer, implement } from '@bu-draft/server';
+
+const t = implement(contract).$context<{ user: User | null }>();
+
+const authed = t.videos.use(async ({ context, next }) => {
+  if (!context.user) throw new UploadError({ code: 'UNAUTHORIZED' });
+  return next({ user: context.user });
+});
+
+export const uploads = createUploadServer({
+  storage,
+  secret: process.env.UPLOAD_SECRET!, // 32+ random characters; seals tickets
+  router: t.router({
+    avatar: t.avatar.handler({
+      onUploadRequested: ({ sessionId }) => ({ key: `avatars/${sessionId}` }),
+      onUploadCompleted: ({ object }) => ({ url: `https://cdn.example.com/${object.key}` }),
+    }),
+    videos: authed.handler({
+      onUploadRequested: ({ context, input, files, sessionId, errors }) => {
+        const total = files.reduce((n, f) => n + f.size, 0);
+        if (total > context.user.quota) errors('QUOTA_EXCEEDED', { data: { remainingBytes: context.user.quota } });
+        return { key: `albums/${input.albumId}/${sessionId}`, meta: { ownerId: context.user.id } };
+      },
+      onUploadStarted: ({ session, ticket }) => db.pendingUploads.insert({ id: session.id, ticket }), // optional
+      onUploadCompleted: async ({ session }) => ({ mediaId: await db.media.create(session) }),
+    }),
+    media: {
+      download: t.media.download.handler({
+        onDownloadRequested: async ({ input, errors }) => {
+          const media = await db.media.find(input.mediaId);
+          if (!media) errors('NOT_FOUND');
+          return { key: media.key, fileName: media.name };
+        },
+      }),
+    },
+  }),
+});
+```
+
+Mount it:
+
+```ts
+// Fetch runtimes: Bun, Deno, Cloudflare Workers, Hono, Next.js route handlers…
+export const handler = (req: Request) => uploads.fetch(req, { user: await getUser(req) });
+
+// Node http / Express
+import { toNodeHandler } from '@bu-draft/server/node';
+app.use(toNodeHandler(uploads, { context: async (req) => ({ user: await getUser(req) }) }));
+```
+
+## 4. Client (browser)
+
+```ts title="client.ts"
+import { createUploadClient } from '@bu-draft/client';
+import { contract } from './contract';
+
+export const client = createUploadClient<typeof contract>({ baseUrl: '/api/upload', contract });
+
+const task = client.videos.upload(file, { input: { albumId } });
+task.subscribe(() => console.log(task.getSnapshot().progress.fraction));
+const { mediaId } = await task.result; // typed
+```
+
+Then [set up the bucket's CORS and lifecycle rule](/docs/storage#bucket-setup) and you are done.

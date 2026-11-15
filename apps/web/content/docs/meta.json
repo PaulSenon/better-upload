@@ -1,0 +1,22 @@
+{
+  "title": "Docs",
+  "pages": [
+    "index",
+    "quick-start",
+    "---Concepts---",
+    "contract",
+    "server",
+    "storage",
+    "client",
+    "react",
+    "components",
+    "---Guides---",
+    "resume",
+    "downloads",
+    "errors",
+    "integrations",
+    "---Reference---",
+    "limits",
+    "protocol"
+  ]
+}
