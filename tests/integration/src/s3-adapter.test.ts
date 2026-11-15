@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { runId, targets } from './env.js';
 
 const MiB = 1024 * 1024;
-function bytes(size: number, seed = 1): Uint8Array {
+function bytes(size: number, seed = 1): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(size);
   let x = seed;
   for (let i = 0; i < size; i++) {

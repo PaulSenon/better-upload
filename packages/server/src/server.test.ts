@@ -234,8 +234,8 @@ describe('upload server', () => {
 
   it('fails fast when an endpoint is not implemented', () => {
     const t = implement(contract);
-    // @ts-expect-error missing endpoints are a type error
     expect(() =>
+      // @ts-expect-error missing endpoints are a type error
       t.router({
         avatar: t.avatar.handler({ onUploadRequested: () => ({ key: 'k' }), onUploadCompleted: () => ({ url: '' }) }),
       }),

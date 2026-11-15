@@ -166,12 +166,18 @@ importers:
 
   tests/integration:
     dependencies:
+      '@bu-draft/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@bu-draft/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@bu-draft/s3':
         specifier: workspace:*
         version: link:../../packages/s3
+      '@bu-draft/server':
+        specifier: workspace:*
+        version: link:../../packages/server
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

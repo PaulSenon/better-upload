@@ -462,9 +462,13 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
     this.#setStatus('uploading');
     await new Promise<void>((resolve, reject) => {
       let active = 0;
-      let failed = false;
+      let failure: unknown;
       const pump = () => {
-        if (failed) return;
+        // On a part failure, stop scheduling but let in-flight parts finish: their bytes are not wasted.
+        if (failure !== undefined) {
+          if (active === 0) reject(failure);
+          return;
+        }
         if (queue.length === 0 && active === 0) return resolve();
         while (active < this.#concurrency.current && queue.length > 0) {
           const partNumber = queue.shift()!;
@@ -476,10 +480,8 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
             },
             (error) => {
               active--;
-              if (!failed) {
-                failed = true;
-                reject(error);
-              }
+              failure ??= error;
+              pump();
             },
           );
         }
