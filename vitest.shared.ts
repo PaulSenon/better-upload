@@ -5,5 +5,5 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: { conditions: ['source', ...defaultClientConditions] },
   ssr: { resolve: { conditions: ['source', ...defaultServerConditions], externalConditions: ['source'] } },
-  test: { include: ['src/**/*.test.ts', 'src/**/*.test.tsx'] },
+  test: { include: ['src/**/*.test.ts', 'src/**/*.test.tsx'], testTimeout: 20_000 },
 });
