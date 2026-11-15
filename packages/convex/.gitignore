@@ -1,0 +1,4 @@
+dist
+.env.local
+.convex
+convex.log

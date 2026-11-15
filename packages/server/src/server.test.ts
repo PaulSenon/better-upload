@@ -263,3 +263,36 @@ describe('storage conformance kit', () => {
     expect(results.length).toBeGreaterThanOrEqual(8);
   });
 });
+
+describe('CORS', () => {
+  it('answers preflights and decorates responses for allowed origins only', async () => {
+    const t = implement(uc.router({ a: uc.upload() }));
+    const server = createUploadServer({
+      storage: memoryStorage(),
+      secret: SECRET,
+      cors: { origin: ['https://app.test'], allowHeaders: ['authorization'] },
+      router: t.router({ a: t.a.handler({ onUploadRequested: ({ sessionId }) => ({ key: sessionId }) }) }),
+    });
+    const pre = await server.fetch(
+      new Request('http://api.test/api/upload/a/init', { method: 'OPTIONS', headers: { origin: 'https://app.test' } }),
+      {},
+    );
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get('access-control-allow-headers')).toContain('x-upload-protocol');
+    const denied = await server.fetch(
+      new Request('http://api.test/api/upload/a/init', { method: 'OPTIONS', headers: { origin: 'https://evil.test' } }),
+      {},
+    );
+    expect(denied.status).toBe(403);
+    const res = await server.fetch(
+      new Request('http://api.test/api/upload/a/init', {
+        method: 'POST',
+        headers: { origin: 'https://app.test', [PROTOCOL_HEADER]: '1' },
+        body: JSON.stringify({ files: [file(10)] }),
+      }),
+      {},
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://app.test');
+  });
+});

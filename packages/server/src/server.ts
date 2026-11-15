@@ -71,6 +71,18 @@ export interface UploadServerOptions<T extends ContractRouter, TCtx extends obje
   readonly receiptTtl?: Duration;
   /** Called for every error before it is serialized (logging / metrics). Internal details never reach the client. */
   readonly onError?: (error: unknown, info: { endpoint: string; op: string }) => void;
+  /**
+   * CORS for apps whose upload server lives on another origin (e.g. a Convex `.convex.site` URL, an API subdomain).
+   * Same-origin setups need nothing. Preflights (OPTIONS) are answered without running any hook.
+   */
+  readonly cors?: {
+    /** Allowed origins, or a function deciding per request. */
+    readonly origin: readonly string[] | ((origin: string) => boolean);
+    /** Allow cookies (`credentials: 'include'` on the client). Default false. */
+    readonly credentials?: boolean;
+    /** Extra request headers your client sends (e.g. `authorization`). */
+    readonly allowHeaders?: readonly string[];
+  };
 }
 
 export interface UploadReceipt<TMeta = unknown> {
@@ -594,8 +606,47 @@ export function createUploadServer<T extends ContractRouter, TCtx extends object
     }
   }
 
+  function corsHeaders(request: Request): Record<string, string> | undefined {
+    const cors = options.cors;
+    const origin = request.headers.get('origin');
+    if (!cors || !origin) return undefined;
+    const allowed =
+      typeof cors.origin === 'function'
+        ? cors.origin(origin)
+        : cors.origin.includes(origin) || cors.origin.includes('*');
+    if (!allowed) return undefined;
+    return {
+      'access-control-allow-origin': origin,
+      vary: 'origin',
+      ...(cors.credentials ? { 'access-control-allow-credentials': 'true' } : {}),
+    };
+  }
+
+  async function handleWithCors(request: Request, appContext: TCtx): Promise<Response> {
+    const cors = corsHeaders(request);
+    if (request.method === 'OPTIONS') {
+      if (!cors) return new Response(null, { status: 403 });
+      return new Response(null, {
+        status: 204,
+        headers: {
+          ...cors,
+          'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS',
+          'access-control-allow-headers': ['content-type', PROTOCOL_HEADER, ...(options.cors?.allowHeaders ?? [])].join(
+            ', ',
+          ),
+          'access-control-max-age': '86400',
+        },
+      });
+    }
+    const response = await handle(request, appContext);
+    if (!cors) return response;
+    const headers = new Headers(response.headers);
+    for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
+
   return {
-    fetch: handle,
+    fetch: handleWithCors,
     basePath,
     '~contract': router['~contract'],
     async verifyReceipt<TMeta>(receipt: string, opts?: { endpoint?: string }) {
