@@ -18,7 +18,7 @@ import {
   type StoredObject,
   type UploadContract,
   UploadError,
-} from '@bu-draft/core';
+} from '@open-upload/core';
 
 // ---------------------------------------------------------------------------
 // Context & middleware (oRPC-style: the context is typed and extended by middleware)

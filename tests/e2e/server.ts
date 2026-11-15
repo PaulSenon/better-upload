@@ -4,9 +4,9 @@
  */
 import { createHash } from 'node:crypto';
 import http from 'node:http';
-import { s3Storage } from '@bu-draft/s3';
-import { createUploadServer, implement } from '@bu-draft/server';
-import { toNodeHandler } from '@bu-draft/server/node';
+import { s3Storage } from '@open-upload/s3';
+import { createUploadServer, implement } from '@open-upload/server';
+import { toNodeHandler } from '@open-upload/server/node';
 import react from '@vitejs/plugin-react';
 import { createServer as createVite } from 'vite';
 import { contract } from './contract.ts';

@@ -1,12 +1,11 @@
-# Upload SDK *(provisional name)*
+# Open Upload
 
 **Type-safe, resumable uploads and downloads to *your* storage.** AWS S3, Cloudflare R2, MinIO and any S3-compatible
 service. No hosted service, no database.
 
 > [!NOTE]
 > Early preview. The code works and is tested (unit, MinIO integration, Playwright e2e on Chromium, WebKit, Firefox and
-> iPhone emulation), but the name is not final and nothing is published to npm yet. The `@bu-draft/*` scope is a
-> placeholder. Docs live in [`apps/web/content/docs`](./apps/web/content/docs).
+> iPhone emulation), but nothing is published to npm yet. Docs live in [`apps/web/content/docs`](./apps/web/content/docs).
 
 - **One contract, end-to-end types.** Declare an endpoint once; the server implements it; the client is derived from it.
 - **Resumable for days.** Presigned multipart, retries with backoff, adaptive concurrency, transparent URL renewal,
@@ -48,11 +47,11 @@ const { mediaId } = await task.result;
 
 | Package | |
 |---|---|
-| [`@bu-draft/core`](./packages/core) | Contract builder, errors, file rules, part planning, checksums. Zero dependencies. |
-| [`@bu-draft/s3`](./packages/s3) | S3-compatible adapter with presets; minimal SigV4 on Web Crypto (no AWS SDK). |
-| [`@bu-draft/server`](./packages/server) | Typed hooks, sealed tickets and receipts, Fetch handler, Node adapter. |
-| [`@bu-draft/client`](./packages/client) | The upload engine and the typed client. |
-| [`@bu-draft/react`](./packages/react) | `useUpload`, `useUploadTask`, `usePendingUploads`. |
+| [`@open-upload/core`](./packages/core) | Contract builder, errors, file rules, part planning, checksums. Zero dependencies. |
+| [`@open-upload/s3`](./packages/s3) | S3-compatible adapter with presets; minimal SigV4 on Web Crypto (no AWS SDK). |
+| [`@open-upload/server`](./packages/server) | Typed hooks, sealed tickets and receipts, Fetch handler, Node adapter. |
+| [`@open-upload/client`](./packages/client) | The upload engine and the typed client. |
+| [`@open-upload/react`](./packages/react) | `useUpload`, `useUploadTask`, `usePendingUploads`. |
 | [`apps/web`](./apps/web) | Docs site and shadcn registry (Fumadocs, TanStack Start, Cloudflare via Alchemy). |
 
 ## Development
@@ -63,7 +62,7 @@ pnpm test                 # unit tests (all packages)
 pnpm minio:up             # local S3 (Docker)
 pnpm test:integration     # adapter + full stack against MinIO (and R2 / AWS when configured)
 pnpm test:e2e             # Playwright: Chromium, WebKit, Firefox, iPhone, with fault injection
-pnpm --filter @bu-draft/web dev   # docs + registry on http://localhost:3000
+pnpm --filter @open-upload/web dev   # docs + registry on http://localhost:3000
 ```
 
 Releases use [changesets](https://github.com/changesets/changesets): `pnpm changeset` in a PR; merging the generated

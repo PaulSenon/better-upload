@@ -9,7 +9,7 @@ export const Route = createFileRoute('/')({
   component: Home,
   head: () => ({
     meta: [
-      { title: 'Upload SDK — type-safe, resumable uploads to your own bucket' },
+      { title: 'Open Upload — type-safe, resumable uploads to your own bucket' },
       {
         name: 'description',
         content:

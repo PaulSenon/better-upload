@@ -1,5 +1,5 @@
 {
-  "name": "@bu-draft/s3",
+  "name": "@open-upload/s3",
   "version": "0.0.0",
   "description": "S3-compatible storage adapter (AWS S3, Cloudflare R2, MinIO, \u2026): minimal SigV4 on Web Crypto, no AWS SDK.",
   "license": "MIT",
@@ -39,7 +39,7 @@
     "check:package": "publint && attw --pack . --profile esm-only"
   },
   "dependencies": {
-    "@bu-draft/core": "workspace:^"
+    "@open-upload/core": "workspace:^"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

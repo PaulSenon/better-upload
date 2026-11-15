@@ -1,6 +1,6 @@
 'use client';
 
-import type { UploadControl } from '@bu-draft/react';
+import type { UploadControl } from '@open-upload/react';
 import { UploadCloud } from 'lucide-react';
 import { type DragEvent, useId, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';

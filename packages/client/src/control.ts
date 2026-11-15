@@ -1,4 +1,4 @@
-import { isUploadErrorShape, PROTOCOL_HEADER, PROTOCOL_VERSION, UploadError } from '@bu-draft/core';
+import { isUploadErrorShape, PROTOCOL_HEADER, PROTOCOL_VERSION, UploadError } from '@open-upload/core';
 
 /** Calls the upload server (small JSON control requests). */
 export interface ControlTransport {

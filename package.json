@@ -1,5 +1,5 @@
 {
-  "name": "upload-sdk-monorepo",
+  "name": "open-upload-monorepo",
   "private": true,
   "description": "Type-safe, resumable uploads and downloads to your own S3-compatible storage. Name is provisional.",
   "license": "MIT",
@@ -12,8 +12,8 @@
     "build": "turbo run build --filter=./packages/*",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "test:integration": "pnpm --filter @bu-draft/integration-tests test:integration",
-    "test:e2e": "pnpm --filter @bu-draft/e2e test:e2e",
+    "test:integration": "pnpm --filter @open-upload/integration-tests test:integration",
+    "test:e2e": "pnpm --filter @open-upload/e2e test:e2e",
     "lint": "biome check .",
     "format": "biome check --write .",
     "check:packages": "turbo run check:package --filter=./packages/*",

@@ -1,4 +1,4 @@
-import type { StorageAdapter } from '@bu-draft/core';
+import type { StorageAdapter } from '@open-upload/core';
 
 /** The subset of the Cloudflare Workers `R2Bucket` binding used here (structural, so no workers-types dependency). */
 export interface R2BucketLike {

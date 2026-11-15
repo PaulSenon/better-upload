@@ -1,5 +1,5 @@
 {
-  "name": "@bu-draft/web",
+  "name": "@open-upload/web",
   "private": true,
   "type": "module",
   "sideEffects": false,
@@ -13,10 +13,10 @@
     "destroy": "alchemy destroy"
   },
   "dependencies": {
-    "@bu-draft/client": "workspace:*",
-    "@bu-draft/core": "workspace:*",
-    "@bu-draft/react": "workspace:*",
-    "@bu-draft/server": "workspace:*",
+    "@open-upload/client": "workspace:*",
+    "@open-upload/core": "workspace:*",
+    "@open-upload/react": "workspace:*",
+    "@open-upload/server": "workspace:*",
     "@tanstack/react-router": "^1.170.0",
     "@tanstack/react-start": "^1.169.0",
     "class-variance-authority": "^0.7.1",

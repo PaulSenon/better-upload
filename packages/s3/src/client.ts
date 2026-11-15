@@ -1,4 +1,4 @@
-import { UploadError } from '@bu-draft/core';
+import { UploadError } from '@open-upload/core';
 import { encodeKeyPath, presignUrl, type SigV4Credentials, sha256Hex, signHeaders } from './sigv4.js';
 
 export interface S3Credentials extends SigV4Credentials {

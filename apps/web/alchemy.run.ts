@@ -2,8 +2,8 @@
  * Infrastructure of the docs + registry site: one Cloudflare Worker serving the TanStack Start app
  * (prerendered docs pages, static `/r/*.json` registry files, server routes for search and llms.txt).
  *
- *   pnpm --filter @bu-draft/web deploy -- --stage prod
- *   pnpm --filter @bu-draft/web destroy -- --stage pr-42
+ *   pnpm --filter @open-upload/web deploy -- --stage prod
+ *   pnpm --filter @open-upload/web destroy -- --stage pr-42
  *
  * Requires CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. State is kept in Cloudflare (Secrets Store), so CI and
  * laptops share it.

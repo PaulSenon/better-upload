@@ -35,7 +35,7 @@ import {
   UploadError,
   type UploadErrorShape,
   validateSchema,
-} from '@bu-draft/core';
+} from '@open-upload/core';
 import {
   type AnyMiddleware,
   createErrorFactory,

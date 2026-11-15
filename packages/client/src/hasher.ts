@@ -1,4 +1,4 @@
-import { checksumBlob } from '@bu-draft/core';
+import { checksumBlob } from '@open-upload/core';
 import type { Hasher } from './types.js';
 
 /**

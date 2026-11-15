@@ -1,6 +1,6 @@
 'use client';
 
-import type { UploadTask } from '@bu-draft/client';
+import type { UploadTask } from '@open-upload/client';
 import { cn } from '@/lib/utils';
 import { UploadItem } from './upload-item';
 

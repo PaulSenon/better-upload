@@ -1,5 +1,5 @@
 /** Provisional product name (see docs/NAMING.md). */
-export const appName = 'Upload SDK';
+export const appName = 'Open Upload';
 export const docsRoute = '/docs';
 
 export const gitConfig = {

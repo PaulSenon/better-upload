@@ -1,14 +1,14 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry.json",
-  "name": "upload-sdk",
+  "name": "open-upload",
   "homepage": "https://github.com/PaulSenon/better-upload",
   "items": [
     {
       "name": "upload",
       "type": "registry:block",
       "title": "Upload",
-      "description": "Dropzone, upload list with progress and controls, and a banner to resume interrupted uploads. Headless engine from @bu-draft/react.",
-      "dependencies": ["@bu-draft/client", "@bu-draft/react", "lucide-react"],
+      "description": "Dropzone, upload list with progress and controls, and a banner to resume interrupted uploads. Headless engine from @open-upload/react.",
+      "dependencies": ["@open-upload/client", "@open-upload/react", "lucide-react"],
       "registryDependencies": ["button", "progress"],
       "files": [
         {

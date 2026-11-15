@@ -1,7 +1,7 @@
-import { uc } from '@bu-draft/core';
-import { type R2BucketLike, withR2Binding } from '@bu-draft/s3/cloudflare';
-import { createUploadServer, implement } from '@bu-draft/server';
-import { memoryStorage } from '@bu-draft/server/testing';
+import { uc } from '@open-upload/core';
+import { type R2BucketLike, withR2Binding } from '@open-upload/s3/cloudflare';
+import { createUploadServer, implement } from '@open-upload/server';
+import { memoryStorage } from '@open-upload/server/testing';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 

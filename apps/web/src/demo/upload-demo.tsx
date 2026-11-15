@@ -1,6 +1,6 @@
 'use client';
 
-import { useUpload } from '@bu-draft/react';
+import { useUpload } from '@open-upload/react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { UploadDropzone } from '@/components/upload/upload-dropzone';

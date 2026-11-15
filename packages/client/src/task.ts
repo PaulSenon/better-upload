@@ -11,7 +11,7 @@ import {
   type StatusResponse,
   UploadError,
   type WirePart,
-} from '@bu-draft/core';
+} from '@open-upload/core';
 import { type ControlTransport, isOffline } from './control.js';
 import type { NetworkMonitor } from './network.js';
 import type {

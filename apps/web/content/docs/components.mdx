@@ -15,11 +15,11 @@ npx shadcn@latest add https://<site>/r/upload.json
 npx shadcn@latest add https://<site>/r/download-button.json
 ```
 
-`upload` adds `components/upload/` (dropzone, item, list, resume banner, format helpers) and installs `@bu-draft/react`,
-`@bu-draft/client`, `lucide-react`, plus the shadcn `button` and `progress` components. The files are yours to edit.
+`upload` adds `components/upload/` (dropzone, item, list, resume banner, format helpers) and installs `@open-upload/react`,
+`@open-upload/client`, `lucide-react`, plus the shadcn `button` and `progress` components. The files are yours to edit.
 
 ```tsx
-import { useUpload } from '@bu-draft/react';
+import { useUpload } from '@open-upload/react';
 import { UploadDropzone } from '@/components/upload/upload-dropzone';
 import { UploadList } from '@/components/upload/upload-list';
 import { UploadResumeBanner } from '@/components/upload/upload-resume-banner';

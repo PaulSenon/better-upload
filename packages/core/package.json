@@ -1,5 +1,5 @@
 {
-  "name": "@bu-draft/core",
+  "name": "@open-upload/core",
   "version": "0.0.0",
   "description": "Contract builder, error model, protocol types and shared utilities (isomorphic, zero dependencies).",
   "license": "MIT",

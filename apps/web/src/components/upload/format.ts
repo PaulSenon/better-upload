@@ -1,4 +1,4 @@
-import type { UploadSnapshot } from '@bu-draft/client';
+import type { UploadSnapshot } from '@open-upload/client';
 
 /** `1.5 MB`, decimal units like OS file managers. */
 export function formatBytes(bytes: number): string {

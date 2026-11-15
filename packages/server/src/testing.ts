@@ -7,7 +7,7 @@ import {
   type StorageCapabilities,
   type StoredObject,
   type StoredPart,
-} from '@bu-draft/core';
+} from '@open-upload/core';
 
 /**
  * In-memory {@link StorageAdapter} for tests and local prototyping. Signed URLs look like

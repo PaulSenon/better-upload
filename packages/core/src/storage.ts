@@ -2,7 +2,7 @@ import type { PartChecksumAlgorithm } from './contract.js';
 import type { EpochMs } from './units.js';
 
 /**
- * Storage port. Implemented by `@bu-draft/s3` (any S3-compatible service). Runs server-side only: it holds
+ * Storage port. Implemented by `@open-upload/s3` (any S3-compatible service). Runs server-side only: it holds
  * credentials. Every method is idempotent where the provider allows it.
  */
 

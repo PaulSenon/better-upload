@@ -1,4 +1,4 @@
-import { checksumBytes, partRange, planParts } from '@bu-draft/core';
+import { checksumBytes, partRange, planParts } from '@open-upload/core';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { runId, targets } from './env.js';
 

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { ContractRouter } from '@bu-draft/core';
+import type { ContractRouter } from '@open-upload/core';
 import type { UploadServer } from './server.js';
 
 /**

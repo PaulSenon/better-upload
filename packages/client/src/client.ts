@@ -10,7 +10,7 @@ import {
   isUploadContract,
   type ResolveResponse,
   type UploadContract,
-} from '@bu-draft/core';
+} from '@open-upload/core';
 import { createControlTransport } from './control.js';
 import { chunkedHasher } from './hasher.js';
 import { createNetworkMonitor } from './network.js';

@@ -5,7 +5,7 @@ icon: Atom
 ---
 
 ```tsx
-import { useUpload, usePendingUploads, useUploadTask } from '@bu-draft/react';
+import { useUpload, usePendingUploads, useUploadTask } from '@open-upload/react';
 
 function Uploader({ albumId }: { albumId: string }) {
   const videos = useUpload(client.videos, { onCompleted: (output) => toast(`Saved ${output.mediaId}`) });

@@ -1,4 +1,4 @@
-import { type S3Preset, s3Storage } from '@bu-draft/s3';
+import { type S3Preset, s3Storage } from '@open-upload/s3';
 
 /**
  * Storage targets. MinIO (docker compose) is always on; real providers run only when their credentials are set:

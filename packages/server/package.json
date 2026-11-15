@@ -1,5 +1,5 @@
 {
-  "name": "@bu-draft/server",
+  "name": "@open-upload/server",
   "version": "0.0.0",
   "description": "Implements an upload contract: typed hooks, sealed session tickets (no database), Fetch handler and Node adapter.",
   "license": "MIT",
@@ -44,7 +44,7 @@
     "check:package": "publint && attw --pack . --profile esm-only"
   },
   "dependencies": {
-    "@bu-draft/core": "workspace:^",
+    "@open-upload/core": "workspace:^",
     "jose": "catalog:"
   },
   "devDependencies": {

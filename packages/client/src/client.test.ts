@@ -1,6 +1,6 @@
-import { checksumBytes, uc } from '@bu-draft/core';
-import { createUploadServer, implement } from '@bu-draft/server';
-import { memoryStorage } from '@bu-draft/server/testing';
+import { checksumBytes, uc } from '@open-upload/core';
+import { createUploadServer, implement } from '@open-upload/server';
+import { memoryStorage } from '@open-upload/server/testing';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import {

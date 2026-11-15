@@ -1,5 +1,5 @@
 {
-  "name": "@bu-draft/client",
+  "name": "@open-upload/client",
   "version": "0.0.0",
   "description": "Typed upload client derived from the contract: resumable multipart, adaptive concurrency, retries, persistence.",
   "license": "MIT",
@@ -34,11 +34,11 @@
     "check:package": "publint && attw --pack . --profile esm-only"
   },
   "dependencies": {
-    "@bu-draft/core": "workspace:^"
+    "@open-upload/core": "workspace:^"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
-    "@bu-draft/server": "workspace:*",
+    "@open-upload/server": "workspace:*",
     "@types/node": "catalog:",
     "publint": "^0.3.25",
     "tsdown": "catalog:",

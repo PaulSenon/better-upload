@@ -42,7 +42,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Destroy preview
         if: github.event.action == 'closed'
-        run: pnpm --filter @bu-draft/web exec alchemy destroy --stage "$STAGE"
+        run: pnpm --filter @open-upload/web exec alchemy destroy --stage "$STAGE"
       - name: Deploy
         if: github.event.action != 'closed'
-        run: pnpm --filter @bu-draft/web run deploy -- --stage "$STAGE"
+        run: pnpm --filter @open-upload/web run deploy -- --stage "$STAGE"

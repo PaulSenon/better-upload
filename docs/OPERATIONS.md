@@ -34,7 +34,7 @@ Model: continuous integration on `main`, **controlled** releases.
 
 To enable:
 
-1. Choose the final name and scope; replace `@bu-draft/` everywhere (one search-and-replace), and the
+1. Choose the final name and scope; replace `@open-upload/` everywhere (one search-and-replace), and the
    `changelog.repo` in `.changeset/config.json` if the repo moves.
 2. Create the npm organization (scope).
 3. For each package on npmjs.com, add a **Trusted Publisher**: GitHub Actions, this repository, workflow `release.yml`,
@@ -52,8 +52,8 @@ To enable:
 
 1. Cloudflare API token with Workers Scripts:Edit, Account Settings:Read, and Secrets Store:Edit (Alchemy keeps its
    state in Cloudflare so CI and laptops share it). Add secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
-2. First deploy from a laptop to bootstrap the state store: `pnpm --filter @bu-draft/web exec alchemy login` (or export
-   the token), then `pnpm --filter @bu-draft/web deploy -- --stage prod`.
+2. First deploy from a laptop to bootstrap the state store: `pnpm --filter @open-upload/web exec alchemy login` (or export
+   the token), then `pnpm --filter @open-upload/web deploy -- --stage prod`.
 3. GitHub environments `site-prod` (optionally with reviewers) and `site-preview`.
 4. Optional: a custom domain (one line in `alchemy.run.ts`), then replace `<site>` in the docs install commands.
 5. Set `SITE_DEPLOY_ENABLED=true`.

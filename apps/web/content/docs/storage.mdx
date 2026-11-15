@@ -5,7 +5,7 @@ icon: Database
 ---
 
 ```ts
-import { s3Storage } from '@bu-draft/s3';
+import { s3Storage } from '@open-upload/s3';
 
 s3Storage({ preset: 'aws', region: 'eu-west-3', bucket: 'media', credentials });
 s3Storage({ preset: 'cloudflare-r2', accountId, bucket: 'media', credentials });

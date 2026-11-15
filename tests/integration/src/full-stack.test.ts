@@ -1,6 +1,6 @@
-import { createUploadClient, fetchTransport, memoryStore, type Transport } from '@bu-draft/client';
-import { checksumBytes, uc } from '@bu-draft/core';
-import { createUploadServer, implement } from '@bu-draft/server';
+import { createUploadClient, fetchTransport, memoryStore, type Transport } from '@open-upload/client';
+import { checksumBytes, uc } from '@open-upload/core';
+import { createUploadServer, implement } from '@open-upload/server';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { runId, targets } from './env.js';

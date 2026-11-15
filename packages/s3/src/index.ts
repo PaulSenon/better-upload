@@ -6,7 +6,7 @@ import {
   type StorageCapabilities,
   type StoredObject,
   type StoredPart,
-} from '@bu-draft/core';
+} from '@open-upload/core';
 import { type CredentialsProvider, S3Client, xmlBlocks, xmlEscape, xmlValue } from './client.js';
 
 export { type CredentialsProvider, S3Client, type S3ClientOptions, type S3Credentials } from './client.js';

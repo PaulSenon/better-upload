@@ -1,5 +1,5 @@
 {
-  "name": "@bu-draft/react",
+  "name": "@open-upload/react",
   "version": "0.0.0",
   "description": "React hooks for the upload client (headless: bring your own UI or the shadcn registry components).",
   "license": "MIT",
@@ -35,15 +35,15 @@
     "check:package": "publint && attw --pack . --profile esm-only"
   },
   "dependencies": {
-    "@bu-draft/client": "workspace:^",
-    "@bu-draft/core": "workspace:^"
+    "@open-upload/client": "workspace:^",
+    "@open-upload/core": "workspace:^"
   },
   "peerDependencies": {
     "react": "^18.2.0 || ^19.0.0"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
-    "@bu-draft/server": "workspace:*",
+    "@open-upload/server": "workspace:*",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/react": "catalog:",

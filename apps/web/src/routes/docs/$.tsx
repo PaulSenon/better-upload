@@ -26,7 +26,7 @@ export const Route = createFileRoute('/docs/$')({
   },
   head: ({ loaderData }) => ({
     meta: loaderData
-      ? [{ title: `${loaderData.title} — Upload SDK` }, { name: 'description', content: loaderData.description }]
+      ? [{ title: `${loaderData.title} — Open Upload` }, { name: 'description', content: loaderData.description }]
       : [],
   }),
 });

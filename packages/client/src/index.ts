@@ -1,4 +1,4 @@
-export { isUploadError, UploadError } from '@bu-draft/core';
+export { isUploadError, UploadError } from '@open-upload/core';
 export { createUploadClient } from './client.js';
 export { type ControlTransport, createControlTransport } from './control.js';
 export { chunkedHasher } from './hasher.js';

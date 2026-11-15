@@ -8,8 +8,8 @@ import type {
   UploadOptions,
   UploadSnapshot,
   UploadTask,
-} from '@bu-draft/client';
-import type { BuiltinError, ContractRouter, EndpointError, FileRules, UploadErrorShape } from '@bu-draft/core';
+} from '@open-upload/client';
+import type { BuiltinError, ContractRouter, EndpointError, FileRules, UploadErrorShape } from '@open-upload/core';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 type AnyTask = UploadTask<any, any>;

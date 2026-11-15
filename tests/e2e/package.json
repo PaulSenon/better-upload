@@ -1,5 +1,5 @@
 {
-  "name": "@bu-draft/e2e",
+  "name": "@open-upload/e2e",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,11 +8,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@bu-draft/client": "workspace:*",
-    "@bu-draft/core": "workspace:*",
-    "@bu-draft/react": "workspace:*",
-    "@bu-draft/s3": "workspace:*",
-    "@bu-draft/server": "workspace:*",
+    "@open-upload/client": "workspace:*",
+    "@open-upload/core": "workspace:*",
+    "@open-upload/react": "workspace:*",
+    "@open-upload/s3": "workspace:*",
+    "@open-upload/server": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "catalog:"

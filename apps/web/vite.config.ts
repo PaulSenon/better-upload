@@ -16,8 +16,8 @@ export default defineConfig({
     // Workspace packages are consumed from source (no prior build): the site always shows the code of this commit.
     alias: [
       { find: 'tslib', replacement: 'tslib/tslib.es6.js' },
-      { find: /^@bu-draft\/server\/testing$/, replacement: pkg('server/src/testing.ts') },
-      { find: /^@bu-draft\/(core|client|react|server)$/, replacement: pkg('$1/src/index.ts') },
+      { find: /^@open-upload\/server\/testing$/, replacement: pkg('server/src/testing.ts') },
+      { find: /^@open-upload\/(core|client|react|server)$/, replacement: pkg('$1/src/index.ts') },
     ],
   },
 });

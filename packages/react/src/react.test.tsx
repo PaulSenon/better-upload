@@ -1,7 +1,7 @@
-import { createUploadClient, fetchTransport, memoryStore } from '@bu-draft/client';
-import { uc } from '@bu-draft/core';
-import { createUploadServer, implement } from '@bu-draft/server';
-import { memoryStorage } from '@bu-draft/server/testing';
+import { createUploadClient, fetchTransport, memoryStore } from '@open-upload/client';
+import { uc } from '@open-upload/core';
+import { createUploadServer, implement } from '@open-upload/server';
+import { memoryStorage } from '@open-upload/server/testing';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';

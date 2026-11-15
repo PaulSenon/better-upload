@@ -1,7 +1,7 @@
 'use client';
 
-import type { UploadTask } from '@bu-draft/client';
-import { useUploadTask } from '@bu-draft/react';
+import type { UploadTask } from '@open-upload/client';
+import { useUploadTask } from '@open-upload/react';
 import { Check, FileIcon, Pause, Play, RefreshCw, RotateCcw, X } from 'lucide-react';
 import { useRef } from 'react';
 import { Button } from '@/components/ui/button';

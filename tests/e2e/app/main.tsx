@@ -1,5 +1,5 @@
-import { createUploadClient } from '@bu-draft/client';
-import { usePendingUploads, useStore, useUpload, useUploadTask } from '@bu-draft/react';
+import { createUploadClient } from '@open-upload/client';
+import { usePendingUploads, useStore, useUpload, useUploadTask } from '@open-upload/react';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { contract } from '../contract.ts';
@@ -88,7 +88,7 @@ function App() {
   const control = videos.control({ input: { albumId: 'e2e' } });
   return (
     <main>
-      <h1>Upload SDK e2e</h1>
+      <h1>Open Upload e2e</h1>
       <input
         type="file"
         data-testid="file"

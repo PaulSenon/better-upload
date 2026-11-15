@@ -1,4 +1,4 @@
-import { checksumBytes, PROTOCOL_HEADER, partRange, uc } from '@bu-draft/core';
+import { checksumBytes, PROTOCOL_HEADER, partRange, uc } from '@open-upload/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { createUploadServer, implement } from './index.js';

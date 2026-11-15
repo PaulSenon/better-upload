@@ -16,7 +16,7 @@ import type {
   SignedRequest,
   UploadContract,
   UploadErrorShape,
-} from '@bu-draft/core';
+} from '@open-upload/core';
 
 // ---------------------------------------------------------------------------
 // Task state machine

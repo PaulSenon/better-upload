@@ -3,10 +3,10 @@
  * the real server router and an in-memory bucket. A simulated network adds latency, bandwidth and failures,
  * so retries, pause/resume and reload-resume behave as they would against S3.
  */
-import { createUploadClient, indexedDBStore, type Transport } from '@bu-draft/client';
-import { uc } from '@bu-draft/core';
-import { createUploadServer, implement } from '@bu-draft/server';
-import { memoryStorage } from '@bu-draft/server/testing';
+import { createUploadClient, indexedDBStore, type Transport } from '@open-upload/client';
+import { uc } from '@open-upload/core';
+import { createUploadServer, implement } from '@open-upload/server';
+import { memoryStorage } from '@open-upload/server/testing';
 
 export const demoContract = uc.router({
   files: uc.upload().files({ maxFiles: 10, maxFileSize: '2GB' }),

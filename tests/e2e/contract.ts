@@ -1,4 +1,4 @@
-import { uc } from '@bu-draft/core';
+import { uc } from '@open-upload/core';
 import { z } from 'zod';
 
 /** Contract shared by the e2e page and server. */

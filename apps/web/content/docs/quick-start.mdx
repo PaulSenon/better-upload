@@ -7,7 +7,7 @@ icon: Rocket
 ## 1. Contract (shared, no secrets)
 
 ```ts title="contract.ts"
-import { uc } from '@bu-draft/core';
+import { uc } from '@open-upload/core';
 import { z } from 'zod'; // any Standard Schema library
 
 export const contract = uc.router({
@@ -29,7 +29,7 @@ export const contract = uc.router({
 ## 2. Bucket (server only)
 
 ```ts title="storage.ts"
-import { s3Storage } from '@bu-draft/s3';
+import { s3Storage } from '@open-upload/s3';
 
 export const storage = s3Storage({
   preset: 'cloudflare-r2',
@@ -42,8 +42,8 @@ export const storage = s3Storage({
 ## 3. Router (server)
 
 ```ts title="uploads.ts"
-import { UploadError } from '@bu-draft/core';
-import { createUploadServer, implement } from '@bu-draft/server';
+import { UploadError } from '@open-upload/core';
+import { createUploadServer, implement } from '@open-upload/server';
 
 const t = implement(contract).$context<{ user: User | null }>();
 
@@ -89,14 +89,14 @@ Mount it:
 export const handler = (req: Request) => uploads.fetch(req, { user: await getUser(req) });
 
 // Node http / Express
-import { toNodeHandler } from '@bu-draft/server/node';
+import { toNodeHandler } from '@open-upload/server/node';
 app.use(toNodeHandler(uploads, { context: async (req) => ({ user: await getUser(req) }) }));
 ```
 
 ## 4. Client (browser)
 
 ```ts title="client.ts"
-import { createUploadClient } from '@bu-draft/client';
+import { createUploadClient } from '@open-upload/client';
 import { contract } from './contract';
 
 export const client = createUploadClient<typeof contract>({ baseUrl: '/api/upload', contract });

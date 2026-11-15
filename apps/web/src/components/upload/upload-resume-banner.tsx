@@ -1,7 +1,7 @@
 'use client';
 
-import type { UploadClient } from '@bu-draft/client';
-import { usePendingUploads } from '@bu-draft/react';
+import type { UploadClient } from '@open-upload/client';
+import { usePendingUploads } from '@open-upload/react';
 import { History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { UploadItem } from './upload-item';

@@ -3,7 +3,7 @@
 > **Status: proposal for discussion. Nothing here is implemented or decided.** Decisions and their status live in
 > [DECISIONS.md](./DECISIONS.md); open questions in [OUTLINE.md](./OUTLINE.md). TypeScript interfaces in `packages/*/src`
 > are the normative shape of this draft and compile (`npm run typecheck`), but contain **no runtime code**.
-> Package scope `@bu-draft/*` is a placeholder (see [NAMING.md](./NAMING.md)).
+> Package scope `@open-upload/*` is a placeholder (see [NAMING.md](./NAMING.md)).
 > Requirement IDs (G1, U2, …) refer to [BRIEF.md](./BRIEF.md).
 
 ## 1. Goals and non-goals
