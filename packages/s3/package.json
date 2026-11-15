@@ -1,7 +1,7 @@
 {
   "name": "@bu-draft/s3",
   "version": "0.0.0",
-  "description": "S3-compatible storage adapter (AWS S3, Cloudflare R2, MinIO, …): minimal SigV4 on Web Crypto, no AWS SDK.",
+  "description": "S3-compatible storage adapter (AWS S3, Cloudflare R2, MinIO, \u2026): minimal SigV4 on Web Crypto, no AWS SDK.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -15,6 +15,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./cloudflare": {
+      "source": "./src/cloudflare.ts",
+      "types": "./dist/cloudflare.d.ts",
+      "default": "./dist/cloudflare.js"
     },
     "./package.json": "./package.json"
   },

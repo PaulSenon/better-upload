@@ -119,7 +119,9 @@ describe('upload server', () => {
     const done = await call('videos/complete', { ticket: session.ticket });
     expect(done.status).toBe(200);
     expect(done.body).toMatchObject({ output: { mediaId: `m-${session.sessionId}` }, alreadyCompleted: false });
-    expect(await checksumBytes('sha256', storage.objects.get(session.key)!.body)).toBe(await checksumBytes('sha256', bytes));
+    expect(await checksumBytes('sha256', storage.objects.get(session.key)!.body)).toBe(
+      await checksumBytes('sha256', bytes),
+    );
 
     const again = await call('videos/complete', { ticket: session.ticket });
     expect(again.body.alreadyCompleted).toBe(true);

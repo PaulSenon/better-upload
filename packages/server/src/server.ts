@@ -479,6 +479,33 @@ export function createUploadServer<T extends ContractRouter, TCtx extends object
     });
   }
 
+  async function proxyDownload(target: DownloadTarget, request: Request): Promise<Response> {
+    if (!storage.getObject) {
+      throw new TypeError(
+        `delivery: 'proxy' needs a storage with getObject (e.g. withR2Binding on Cloudflare); ${storage.name} has none`,
+      );
+    }
+    const forwarded = new Headers();
+    for (const name of ['range', 'if-range', 'if-none-match', 'if-match', 'if-modified-since']) {
+      const value = request.headers.get(name);
+      if (value) forwarded.set(name, value);
+    }
+    const upstream = await storage.getObject({
+      key: target.key,
+      ...(target.versionId ? { versionId: target.versionId } : {}),
+      headers: forwarded,
+    });
+    const headers = new Headers(upstream.headers);
+    const disposition = target.disposition ?? 'attachment';
+    headers.set(
+      'content-disposition',
+      target.fileName ? contentDisposition(disposition, target.fileName) : disposition,
+    );
+    if (target.contentType) headers.set('content-type', target.contentType);
+    headers.set('cache-control', 'private, no-store');
+    return new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers });
+  }
+
   // -------------------------------------------------------------------------
   // HTTP
   // -------------------------------------------------------------------------
@@ -512,7 +539,9 @@ export function createUploadServer<T extends ContractRouter, TCtx extends object
           throw UploadError.builtin('INPUT_INVALID', { message: 'Malformed input query parameter' });
         }
         const context = await runMiddleware(impl['~middleware'], baseContext, endpoint, 'download');
-        const signed = await signDownload(await resolveDownload(impl, input, context));
+        const target = await resolveDownload(impl, input, context);
+        if (target.delivery === 'proxy') return await proxyDownload(target, request);
+        const signed = await signDownload(target);
         return new Response(null, {
           status: 302,
           headers: { location: signed.url, 'cache-control': 'private, no-store', 'referrer-policy': 'no-referrer' },

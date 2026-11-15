@@ -196,6 +196,14 @@ export interface DownloadTarget {
    * Default 1 h, capped by the provider (7 d) and by temporary credentials.
    */
   readonly expiresIn?: Duration;
+  /**
+   * How the stable link delivers the bytes:
+   *  - `'redirect'` (default, any storage): 302 to a fresh presigned URL. Zero compute. Retry always works; resume
+   *    works while the presigned URL is valid.
+   *  - `'proxy'` (Cloudflare Worker + R2 binding, see `withR2Binding`): the link streams the bytes itself with
+   *    Range support, so resume works whenever the browser supports it. Errors if the storage has no `getObject`.
+   */
+  readonly delivery?: 'redirect' | 'proxy';
 }
 
 export interface DownloadHooks<C extends DownloadContract<any>, TCtx extends object> {
