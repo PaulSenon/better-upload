@@ -6,20 +6,14 @@ import type {
   ReadableStore,
   UploadableFile,
   UploadClient,
+  UploadClientRuntime,
   UploadContract,
   UploadEndpointClient,
   UploadOptions,
   UploadSnapshot,
   UploadTask,
 } from '@open-upload/client';
-import type {
-  BuiltinError,
-  ContractRouter,
-  DownloadContract,
-  EndpointError,
-  FileRules,
-  UploadErrorShape,
-} from '@open-upload/core';
+import type { BuiltinError, DownloadContract, EndpointError, FileRules, UploadErrorShape } from '@open-upload/core';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 type AnyTask = UploadTask<any, any>;
@@ -205,9 +199,7 @@ export function useUpload<C extends UploadContract<any>>(
  * Unfinished uploads persisted on this device (after a reload or days later), usually shown as
  * "Select the file again to continue". Calls `client.$restore()` once.
  */
-export function usePendingUploads<T extends ContractRouter>(
-  client: UploadClient<T>,
-): readonly UploadTask<unknown, BuiltinError>[] {
+export function usePendingUploads(client: UploadClientRuntime): readonly UploadTask<unknown, BuiltinError>[] {
   const all = useStore(client.$tasks);
   useEffect(() => {
     void client.$restore();

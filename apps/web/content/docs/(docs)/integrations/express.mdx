@@ -1,0 +1,27 @@
+---
+title: Express
+description: Express, Connect and Node's http module, through the Node adapter.
+---
+
+```ts
+import express from 'express';
+import { toNodeHandler } from '@open-upload/server/node';
+import { uploads } from './uploads';
+
+const app = express();
+
+// Mount BEFORE express.json(): the upload server reads the raw body itself.
+app.use('/api/upload', toNodeHandler(uploads, { context: (req) => ({ user: req.user ?? null }) }));
+
+app.use(express.json());
+// ...your other routes
+```
+
+`toNodeHandler` uses `req.originalUrl`, so the full path (with the `/api/upload` prefix) reaches the server whatever
+the mount point. With plain `node:http`:
+
+```ts
+import { createServer } from 'node:http';
+const handle = toNodeHandler(uploads, { context: () => ({ user: null }) });
+createServer((req, res) => (req.url?.startsWith('/api/upload/') ? handle(req, res) : app(req, res))).listen(3000);
+```

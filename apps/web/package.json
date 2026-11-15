@@ -27,7 +27,8 @@
     "lucide-react": "^1.71.0",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "tailwind-merge": "^3.3.1"
+    "tailwind-merge": "^3.3.1",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@alchemy.run/cloudflare": "2.0.0-beta.85",

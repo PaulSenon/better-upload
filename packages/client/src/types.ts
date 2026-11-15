@@ -260,7 +260,8 @@ export type UploadClientTree<T extends ContractRouter> = {
         : never;
 };
 
-export type UploadClient<T extends ContractRouter> = UploadClientTree<T> & {
+/** The client-wide methods, independent of the contract (accept this type in components taking "any client"). */
+export interface UploadClientRuntime {
   /** Every task of this client, for global UIs (upload tray, "resume your uploads" banner). */
   readonly $tasks: ReadableStore<readonly UploadTask<unknown, BuiltinError>[]>;
   /** Restores unfinished uploads persisted on this device as `needs-file` tasks. Idempotent. */
@@ -269,7 +270,9 @@ export type UploadClient<T extends ContractRouter> = UploadClientTree<T> & {
   $resumeAll(): void;
   /** Stops timers and listeners, aborts in-flight requests (uploads stay resumable). */
   $dispose(): void;
-};
+}
+
+export type UploadClient<T extends ContractRouter> = UploadClientTree<T> & UploadClientRuntime;
 
 export interface UploadClientOptions<T extends ContractRouter> {
   /** e.g. `/api/upload` or `https://api.example.com/api/upload`. Must match the server `basePath`. */

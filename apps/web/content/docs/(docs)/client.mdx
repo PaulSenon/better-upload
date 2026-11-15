@@ -25,6 +25,7 @@ Pass only the type (`createUploadClient<typeof contract>({ baseUrl })`) to keep 
 | `client.videos.validate(file)`, `.accept`, `.rules` | Client-side rules. |
 | `client.media.download.link({ input })` | Stable download link (no network call). |
 | `client.media.download.resolve({ input })` | Presigned request + object info now. |
+| `client.media.download.download({ input })` | Managed download (see [Downloads](/docs/downloads)). |
 
 ## Tasks
 
@@ -46,7 +47,10 @@ non-retryable failure; a retryable failure waits for `retry()`.
 ## Engine defaults
 
 - 8 MiB parts, equal-sized (Cloudflare R2 requirement), up to 10,000 parts.
-- CRC32C per part, computed in 1 MiB slices (pure TypeScript, about 1 GB/s on a laptop).
+- CRC32C per part, computed in a **pool of Web Workers** (up to 4) with zero copies: the worker receives a reference to
+  the `File` and streams its own slice from disk; the next parts are hashed while earlier ones are on the network, so
+  hashing stays off the critical path and the UI never freezes (checked in e2e with a 512 MiB file). Strict CSPs: allow
+  `worker-src blob:` or pass `workerHasher({ createWorker })` with `@open-upload/client/hash-worker`.
 - Adaptive concurrency: starts at 3, up to 6, halved on timeouts and throttling.
 - Retries with full-jitter exponential backoff (10 attempts per part, up to 30 s apart). Offline time costs nothing.
 - Stall detection: a part with no progress for 30 s is retried.

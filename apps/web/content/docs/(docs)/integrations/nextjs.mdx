@@ -1,0 +1,20 @@
+---
+title: Next.js
+description: App Router route handler.
+---
+
+```ts title="app/api/upload/[...path]/route.ts"
+import { uploads } from '@/server/uploads'; // createUploadServer({ ..., basePath: '/api/upload' })
+import { auth } from '@/server/auth';
+
+async function handler(request: Request) {
+  const session = await auth(); // your auth (Auth.js, Better Auth, Clerk…)
+  return uploads.fetch(request, { user: session?.user ?? null });
+}
+
+export { handler as GET, handler as POST };
+export const runtime = 'nodejs'; // or 'edge': the server only needs Web Crypto and fetch
+```
+
+Route handlers receive the raw `Request`, so nothing else is needed. On the client:
+`createUploadClient<typeof contract>({ baseUrl: '/api/upload', contract })`.

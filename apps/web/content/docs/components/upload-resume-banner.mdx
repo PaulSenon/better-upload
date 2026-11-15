@@ -1,0 +1,16 @@
+---
+title: Resume banner
+description: Interrupted uploads that continue once the same file is selected again.
+---
+
+<ResumeBannerPreview />
+
+<RegistryInstall item="upload-resume-banner" />
+
+```tsx
+<UploadResumeBanner client={client} />
+```
+
+After a reload (or days later) the browser no longer has access to the file, only to the upload's ticket. The banner
+lists those uploads; when the user selects the file again it is checked against what the bucket already holds, then
+only the missing parts are sent. A different file is refused with a clear message.

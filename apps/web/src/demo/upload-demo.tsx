@@ -56,7 +56,7 @@ export function UploadDemo() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   return (
-    <div className="not-prose rounded-xl border bg-card p-4 shadow-sm">
+    <div className="not-prose my-6 rounded-xl border bg-card p-4 shadow-sm">
       {mounted ? <DemoInner /> : <div className="h-40 animate-pulse rounded-lg bg-muted" />}
     </div>
   );

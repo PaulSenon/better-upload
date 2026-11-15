@@ -7,9 +7,11 @@ import { createUploadClient, indexedDBStore, type Transport } from '@open-upload
 import { uc } from '@open-upload/core';
 import { createUploadServer, implement } from '@open-upload/server';
 import { memoryStorage } from '@open-upload/server/testing';
+import { z } from 'zod';
 
 export const demoContract = uc.router({
   files: uc.upload().files({ maxFiles: 10, maxFileSize: '2GB' }),
+  download: uc.download().input(z.object({ key: z.string(), name: z.string() })),
 });
 
 export interface NetworkSim {
@@ -30,6 +32,7 @@ function createDemo() {
     secret: 'demo-secret-demo-secret-demo-secret!',
     router: t.router({
       files: t.files.handler({ onUploadRequested: ({ sessionId, file }) => ({ key: `${sessionId}/${file.name}` }) }),
+      download: t.download.handler({ onDownloadRequested: ({ input }) => ({ key: input.key, fileName: input.name }) }),
     }),
   });
   const transport: Transport = {
@@ -57,6 +60,7 @@ function createDemo() {
     contract: demoContract,
     fetch: (input, init) => server.fetch(new Request(input, init), {}),
     transport,
+    storageFetch: (input, init) => storage.fetch(input, init),
     persistence: typeof indexedDB === 'undefined' ? false : indexedDBStore({ dbName: 'upload-sdk-docs-demo' }),
     retry: { baseDelayMs: 300, maxDelayMs: 3000 },
   });

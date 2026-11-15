@@ -1,0 +1,14 @@
+---
+title: Elysia
+description: Bun-first, Fetch-native.
+---
+
+```ts
+import { Elysia } from 'elysia';
+import { uploads } from './uploads';
+
+new Elysia()
+  // `parse: 'none'` keeps the body unread: the upload server parses it itself.
+  .all('/api/upload/*', ({ request, store }) => uploads.fetch(request, { user: store.user ?? null }), { parse: 'none' })
+  .listen(3000);
+```

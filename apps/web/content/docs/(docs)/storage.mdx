@@ -1,0 +1,88 @@
+---
+title: Storage
+description: One S3 adapter for every S3-compatible provider; any other storage is one small object.
+icon: Database
+---
+
+## S3-compatible providers
+
+Almost every object storage speaks the S3 API, so there is **one** adapter. A provider is just data — an endpoint, a
+URL style and what it supports:
+
+```ts
+import { aws, backblazeB2, cloudflareR2, minio, s3Compatible, s3Storage } from '@open-upload/s3';
+
+s3Storage({ provider: aws({ region: 'eu-west-3' }), bucket: 'media', credentials });
+s3Storage({ provider: cloudflareR2({ accountId }), bucket: 'media', credentials });
+s3Storage({ provider: minio({ endpoint: 'http://localhost:9000' }), bucket: 'media', credentials });
+s3Storage({ provider: backblazeB2({ region: 'us-west-004' }), bucket: 'media', credentials });
+
+// Anything else (Wasabi, Tigris, DigitalOcean Spaces, Scaleway, OVH, Hetzner, Garage…)
+s3Storage({ provider: s3Compatible({ endpoint: 'https://s3.example.com', capabilities: { checksums: ['crc32c'] } }), bucket, credentials });
+```
+
+The adapter signs requests itself (SigV4 on Web Crypto, verified against AWS's published examples), so it runs on Node,
+Bun, Deno, Cloudflare Workers and Convex without the AWS SDK.
+
+| Provider | Per-part checksums | Incomplete uploads discarded by the provider |
+|---|---|---|
+| `aws` | CRC32C (default), CRC32, SHA-256, SHA-1 | never (billed until aborted: add the lifecycle rule) |
+| `cloudflareR2` | CRC32C, CRC32, SHA-256, SHA-1 | after 7 days |
+| `minio` | CRC32C, CRC32, SHA-256, SHA-1 | after 24 hours (default) |
+| `backblazeB2`, `s3Compatible` | none unless declared | unknown |
+
+Unknown capabilities fall back to conservative defaults. Declaring `checksums` for a provider that supports them
+turns on per-part integrity verified by the storage. The server keeps a session's lifetime below the provider's cleanup
+window. `credentials` can be a function returning temporary credentials (STS); presigned URL lifetimes are clamped to
+their expiry. `keyPrefix` confines every key to a prefix.
+
+Presigned PUTs sign `content-length` and the part checksum, so the browser cannot send a different size or different bytes.
+
+## Is my provider compatible?
+
+Run the conformance kit against a test bucket. It executes exactly what the upload flow relies on (signed single PUT,
+checksum and size enforcement, multipart with ListParts, completion, abort, ranged GET) and reports each check:
+
+```ts
+import { checkStorageConformance } from '@open-upload/server/testing';
+
+const results = await checkStorageConformance(storage);
+console.table(results); // [{ name, ok, error? }]
+```
+
+CI runs it against MinIO on every change, and against R2 and AWS when credentials are configured.
+
+## Another kind of storage
+
+For anything that doesn't speak S3 (Azure Blob, GCS JSON API, Bunny Storage, a local disk for development), implement
+the `StorageAdapter` interface from `@open-upload/core` — one object, eight methods:
+
+| Method | Role |
+|---|---|
+| `signPutObject` | Presigned single PUT (small files), signing size, checksum and metadata |
+| `createMultipartUpload` | Start a multipart upload, with session metadata |
+| `signUploadPart` | Presigned PUT for one part |
+| `listParts` | What the storage holds (`null` if the upload is gone) — the source of truth for resume |
+| `completeMultipartUpload` | Assemble the object (`null` if already completed or gone) |
+| `abortMultipartUpload` | Idempotent cancel |
+| `headObject` | Size, ETag and metadata of an object (`null` if missing) |
+| `signGetObject` | Presigned GET for downloads |
+
+`getObject` (proxy downloads) and `deleteObject` are optional. Then run `checkStorageConformance` until every check
+passes. The in-memory adapter in `@open-upload/server/testing` is a complete, small reference implementation.
+
+## Cloudflare: proxy downloads through the R2 binding
+
+```ts
+import { withR2Binding } from '@open-upload/s3/cloudflare';
+const storage = withR2Binding(s3Storage({ provider: cloudflareR2({ accountId }), bucket: 'media', credentials }), env.BUCKET);
+```
+
+Adds `getObject`, which enables `delivery: 'proxy'` for downloads ([Downloads](/docs/downloads)).
+
+## Bucket setup
+
+The SDK never changes your bucket. `recommendedBucketConfig({ allowedOrigins, abortIncompleteAfterDays })` returns:
+
+- **CORS**: `PUT`, `GET`, `HEAD` from your origins, headers `content-type`, `x-amz-checksum-*`, `x-amz-meta-*`, `range`, `if-match`.
+- **Lifecycle**: abort incomplete multipart uploads after N days, so abandoned uploads stop costing money.

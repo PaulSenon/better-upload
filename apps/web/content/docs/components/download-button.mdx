@@ -1,0 +1,21 @@
+---
+title: Download button
+description: A link that always works, enhanced into a managed download when you want one.
+---
+
+<DownloadButtonPreview />
+
+<RegistryInstall item="download-button" />
+
+```tsx
+// A plain, stable link for the browser's own download manager (no JavaScript needed).
+<DownloadButton href={client.media.download.link({ input: { mediaId } })} />
+
+// Progressive enhancement: a managed download with progress, pause and resume; falls back to the link.
+<DownloadButton
+  href={client.media.download.link({ input: { mediaId } })}
+  managed={() => client.media.download.download({ input: { mediaId } })}
+/>
+```
+
+See [Downloads](/docs/downloads) for how each mode behaves on failures.

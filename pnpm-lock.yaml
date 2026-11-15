@@ -119,6 +119,9 @@ importers:
       tailwind-merge:
         specifier: ^3.3.1
         version: 3.7.0
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
     devDependencies:
       '@alchemy.run/cloudflare':
         specifier: 2.0.0-beta.85

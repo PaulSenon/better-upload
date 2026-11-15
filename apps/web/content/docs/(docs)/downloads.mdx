@@ -1,0 +1,55 @@
+---
+title: Downloads
+description: A stable link for the browser's own download manager, progressively enhanced into managed downloads.
+icon: Download
+---
+
+## The link (works everywhere, no JavaScript needed)
+
+```tsx
+<a href={client.media.download.link({ input: { mediaId } })} download>Download</a>
+```
+
+The link points at your server. Each hit runs `onDownloadRequested` (with the user's session), then redirects to a
+fresh presigned URL. So:
+
+- **Retry always works**: the link never expires; a click or the browser's "retry" re-authorizes and re-signs.
+- **Resume works while the presigned URL is valid**: browsers resume an interrupted download against the final URL.
+  Size `expiresIn` to the expected download time (default 1 h, up to 7 days). After that a retry restarts from zero —
+  the download stays possible.
+- **Access is checked on every hit**: revoking access in your app takes effect immediately.
+
+### On Cloudflare: proxy delivery
+
+With the R2 binding (`withR2Binding`), return `delivery: 'proxy'` and the stable link streams the bytes itself with
+`Range` support: interrupted downloads resume whenever the browser supports it, with no URL to expire. R2 egress is free.
+
+## Managed downloads (progressive enhancement)
+
+```ts
+// in a click handler
+const task = client.media.download.download({ input: { mediaId } });
+task.subscribe(() => console.log(task.getSnapshot().fraction));
+```
+
+The managed download fetches the object in parallel ranges straight from the storage and writes them to the best
+available place, with retries (backoff, offline waiting), automatic re-signing when the presigned URL expires, and
+pause / resume:
+
+| Sink | Where | Notes |
+|---|---|---|
+| `file-system-access` | the file the user picks | Chromium. Writes in place: no memory, no double disk use. Needs the click (save dialog). |
+| `opfs` | browser storage, then saved | Chromium, Firefox, Safari 26+. Bytes stay on disk, not in memory; saving temporarily doubles disk use. |
+| `memory` | a Blob | Small files (default limit 256 MiB). |
+| `native` | the link above | Automatic fallback when nothing else fits. |
+
+`sink: 'auto'` (default) picks in that order. Every request carries `If-Match` with the object's ETag: if the file
+changes on the server during the download, it fails with `INTEGRITY_MISMATCH` instead of mixing two versions.
+
+`result` resolves with the Blob (memory, OPFS) or `undefined` (written to the picked file, or handed to the browser).
+Set `save: false` to keep the Blob without triggering the save dialog (e.g. to decrypt or preview it).
+
+React: `useDownload(endpoint)` returns `{ start, task, snapshot }`; the [`DownloadButton`](/docs/components/download-button)
+component is a link by default and becomes a managed download with progress when given `managed`.
+
+Not yet: resuming a managed download after a page reload (the in-page task resumes; a reload starts over).

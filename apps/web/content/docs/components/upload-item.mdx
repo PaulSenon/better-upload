@@ -1,0 +1,26 @@
+---
+title: Upload item
+description: One upload, its progress and the actions that make sense now.
+---
+
+<ItemPreview />
+
+<RegistryInstall item="upload-item" />
+
+```tsx
+<UploadItem task={task} />
+```
+
+The status line and buttons follow the task's state:
+
+| Status | Shows |
+|---|---|
+| uploading | speed and time left, pause, cancel |
+| paused | resume, cancel |
+| waiting for network / retrying | the reason; it continues by itself |
+| failed (retryable) | the error and a retry button |
+| expired | "This upload expired…" and **Start over** (never restarted silently) |
+| needs file | **Select file** (the file is verified before anything is sent) |
+| completed | a check mark |
+
+Copy lives in `format.ts` (`statusLabel`, `formatBytes`): translate or reword it there.

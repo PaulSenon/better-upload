@@ -1,0 +1,15 @@
+---
+title: Upload list
+description: Several uploads.
+---
+
+<ListPreview />
+
+<RegistryInstall item="upload-list" />
+
+```tsx
+const upload = useUpload(client.videos);
+<UploadList tasks={upload.tasks} empty={<p>No uploads yet</p>} />
+```
+
+Pass `client.$tasks` (via `useStore`) instead to list every upload of the app, e.g. in a global upload tray.

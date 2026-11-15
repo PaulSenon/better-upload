@@ -4,10 +4,124 @@
   "homepage": "https://github.com/PaulSenon/better-upload",
   "items": [
     {
+      "name": "upload-dropzone",
+      "type": "registry:component",
+      "title": "Upload dropzone",
+      "description": "Drag-and-drop zone and file picker bound to an upload endpoint. Shows accepted types and limits from your contract.",
+      "dependencies": ["@open-upload/react", "lucide-react"],
+      "files": [
+        {
+          "path": "src/components/upload/upload-dropzone.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-dropzone.tsx"
+        }
+      ],
+      "categories": ["upload", "form"],
+      "docs": "Components need a typed client: createUploadClient<typeof contract>({ baseUrl: '/api/upload', contract }). See the docs: /docs/components"
+    },
+    {
+      "name": "upload-item",
+      "type": "registry:component",
+      "title": "Upload item",
+      "description": "One upload with progress, speed, a human status line and the actions that make sense now (pause, resume, retry, start over, select file again, cancel).",
+      "dependencies": ["@open-upload/client", "@open-upload/react", "lucide-react"],
+      "registryDependencies": ["button", "progress"],
+      "files": [
+        {
+          "path": "src/components/upload/upload-item.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-item.tsx"
+        },
+        {
+          "path": "src/components/upload/format.ts",
+          "type": "registry:component",
+          "target": "components/upload/format.ts"
+        }
+      ],
+      "categories": ["upload"],
+      "docs": "Components need a typed client: createUploadClient<typeof contract>({ baseUrl: '/api/upload', contract }). See the docs: /docs/components"
+    },
+    {
+      "name": "upload-list",
+      "type": "registry:component",
+      "title": "Upload list",
+      "description": "A list of upload items.",
+      "dependencies": ["@open-upload/client", "@open-upload/react", "lucide-react"],
+      "registryDependencies": ["button", "progress"],
+      "files": [
+        {
+          "path": "src/components/upload/upload-list.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-list.tsx"
+        },
+        {
+          "path": "src/components/upload/upload-item.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-item.tsx"
+        },
+        {
+          "path": "src/components/upload/format.ts",
+          "type": "registry:component",
+          "target": "components/upload/format.ts"
+        }
+      ],
+      "categories": ["upload"],
+      "docs": "Components need a typed client: createUploadClient<typeof contract>({ baseUrl: '/api/upload', contract }). See the docs: /docs/components"
+    },
+    {
+      "name": "upload-resume-banner",
+      "type": "registry:component",
+      "title": "Resume banner",
+      "description": "Lists interrupted uploads (reload, closed tab, days ago) that continue once the user selects the same file again.",
+      "dependencies": ["@open-upload/client", "@open-upload/react", "lucide-react"],
+      "registryDependencies": ["button", "progress"],
+      "files": [
+        {
+          "path": "src/components/upload/upload-resume-banner.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-resume-banner.tsx"
+        },
+        {
+          "path": "src/components/upload/upload-item.tsx",
+          "type": "registry:component",
+          "target": "components/upload/upload-item.tsx"
+        },
+        {
+          "path": "src/components/upload/format.ts",
+          "type": "registry:component",
+          "target": "components/upload/format.ts"
+        }
+      ],
+      "categories": ["upload"],
+      "docs": "Components need a typed client: createUploadClient<typeof contract>({ baseUrl: '/api/upload', contract }). See the docs: /docs/components"
+    },
+    {
+      "name": "download-button",
+      "type": "registry:component",
+      "title": "Download button",
+      "description": "A stable, re-authorized download link for the browser's own download manager, optionally enhanced into a managed download with progress, pause and resume.",
+      "dependencies": ["@open-upload/client", "@open-upload/react", "lucide-react"],
+      "registryDependencies": ["button", "progress"],
+      "files": [
+        {
+          "path": "src/components/upload/download-button.tsx",
+          "type": "registry:component",
+          "target": "components/upload/download-button.tsx"
+        },
+        {
+          "path": "src/components/upload/format.ts",
+          "type": "registry:component",
+          "target": "components/upload/format.ts"
+        }
+      ],
+      "categories": ["download"],
+      "docs": "Components need a typed client: createUploadClient<typeof contract>({ baseUrl: '/api/upload', contract }). See the docs: /docs/components"
+    },
+    {
       "name": "upload",
       "type": "registry:block",
-      "title": "Upload",
-      "description": "Dropzone, upload list with progress and controls, and a banner to resume interrupted uploads. Headless engine from @open-upload/react.",
+      "title": "Upload (all components)",
+      "description": "Dropzone, upload list, resume banner and download button together.",
       "dependencies": ["@open-upload/client", "@open-upload/react", "lucide-react"],
       "registryDependencies": ["button", "progress"],
       "files": [
@@ -32,21 +146,6 @@
           "target": "components/upload/upload-resume-banner.tsx"
         },
         {
-          "path": "src/components/upload/format.ts",
-          "type": "registry:component",
-          "target": "components/upload/format.ts"
-        }
-      ]
-    },
-    {
-      "name": "download-button",
-      "type": "registry:component",
-      "title": "Download button",
-      "description": "A stable, re-authorized download link for the browser's own download manager, optionally enhanced into a managed download with progress, pause and resume.",
-      "dependencies": ["@open-upload/client", "@open-upload/react", "lucide-react"],
-      "registryDependencies": ["button", "progress"],
-      "files": [
-        {
           "path": "src/components/upload/download-button.tsx",
           "type": "registry:component",
           "target": "components/upload/download-button.tsx"
@@ -56,7 +155,9 @@
           "type": "registry:component",
           "target": "components/upload/format.ts"
         }
-      ]
+      ],
+      "categories": ["upload", "download"],
+      "docs": "Components need a typed client: createUploadClient<typeof contract>({ baseUrl: '/api/upload', contract }). See the docs: /docs/components"
     }
   ]
 }

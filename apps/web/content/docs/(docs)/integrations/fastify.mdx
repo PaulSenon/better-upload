@@ -1,0 +1,31 @@
+---
+title: Fastify
+description: Pass the raw request through.
+---
+
+Fastify parses JSON bodies before handlers run, so give the upload routes a raw-body parser and forward a `Request`:
+
+```ts
+import Fastify from 'fastify';
+import { uploads } from './uploads';
+
+const app = Fastify();
+
+app.register(async (scope) => {
+  // Keep the body as a string for these routes only.
+  scope.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => done(null, body));
+  scope.all('/api/upload/*', async (req, reply) => {
+    const url = new URL(req.url, `${req.protocol}://${req.headers.host}`);
+    const response = await uploads.fetch(
+      new Request(url, {
+        method: req.method,
+        headers: req.headers as Record<string, string>,
+        ...(req.method === 'GET' || req.method === 'HEAD' ? {} : { body: req.body as string }),
+      }),
+      { user: req.user ?? null },
+    );
+    reply.status(response.status).headers(Object.fromEntries(response.headers));
+    return reply.send(response.body ? Buffer.from(await response.arrayBuffer()) : null);
+  });
+});
+```

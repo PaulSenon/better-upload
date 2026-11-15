@@ -1,0 +1,17 @@
+---
+title: Hono
+description: Any runtime Hono runs on (Node, Bun, Deno, Workers).
+---
+
+```ts
+import { Hono } from 'hono';
+import { uploads } from './uploads';
+
+const app = new Hono<{ Variables: { user: User | null } }>();
+
+app.all('/api/upload/*', (c) => uploads.fetch(c.req.raw, { user: c.get('user') }));
+
+export default app;
+```
+
+`c.req.raw` is the untouched `Request`. Put your auth middleware before this route.
