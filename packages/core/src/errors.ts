@@ -17,6 +17,8 @@ export type UserAction =
   | 'retry'
   /** The original file must be selected again (lost handle after reload, or mismatch). */
   | 'reselect-file'
+  /** Nothing is left to resume (expired / discarded session): only a restart from 0 % is possible. Ask first. */
+  | 'restart'
   /** Authentication expired or is missing. */
   | 'sign-in'
   /** The file or request itself is invalid; retrying will not help. */

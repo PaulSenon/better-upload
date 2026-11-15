@@ -30,6 +30,20 @@
 Free: `relay-upload`, `ferry-upload`, `uplift-upload`, `betterupload`, `@upkit/core`.
 Taken: `resumable`, `upkit`, `haul`, `carryall`, `chunkwise`.
 
+## Round 2 (2026-11-15): what the existing Better Upload is, and a shortlist
+
+See [research/better-upload-and-naming.md](./research/better-upload-and-naming.md).
+- **Verdict:** the overlap is on the surface only.
+  - Both are React-first, S3-compatible and shadcn-flavoured, with no DB.
+  - Theirs has no resume across sessions or days, no integrity checks, no typed client contract, and fixed retry and concurrency settings.
+- **The name collision is direct,** though: same category, about 100k weekly downloads, and they own the domain.
+- **Shortlist** (npm name, npm scope and GitHub all free at check time; domains and trademarks not checked yet):
+  1. `steadyload`
+  2. `cargohold`
+  3. `upferry`
+
+  Also free: `filewire`, `durable-upload`, `upstay`.
+
 ## Suggested process (when the owner wants it)
 
 1. Shortlist 3–5 names.

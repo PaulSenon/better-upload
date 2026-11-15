@@ -33,6 +33,8 @@ export interface VerificationPlan {
   /** Part numbers to re-checksum before resuming. */
   readonly partsToVerify: readonly number[];
   readonly reason: 'metadata' | 'sample' | 'full';
+  /** Set when `verify: 'auto'` escalated from a sample to a full check, and why. */
+  readonly escalated?: 'last-modified-changed' | 'type-changed' | 'ambiguous-candidates' | 'sample-unavailable';
 }
 
 export type VerificationResult =

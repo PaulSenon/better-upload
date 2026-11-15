@@ -16,7 +16,7 @@ export const contract = uc.router({
     .errors({
       QUOTA_EXCEEDED: { status: 403, data: z.object({ remainingBytes: z.number() }), userAction: 'contact-support' },
     })
-    .resume({ ttl: '7d', verify: 'sample' })
+    .resume({ ttl: '7d', verify: 'auto' })
     .integrity({ partChecksum: 'crc32c' }),
 
   media: {

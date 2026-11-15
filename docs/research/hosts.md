@@ -31,6 +31,11 @@
   - Azure gained `chunkLargeFiles` in 3.87.
   - S3 multipart client uploads are in **open PR #17005**, targeting v4, with no resume (<https://github.com/payloadcms/payload/pull/17005>).
   - There are community reports of a 17 GB video failing.
+- **Update (2026-11-15, round 2):** the Payload team's PR [#19325](https://github.com/payloadcms/payload/pull/19325), "feat(storage-s3): resumable upload sessions", was **approved** on 2026-11-12. It targets `main`, the v4 line, and is not in stable 3.93.0.
+  - It adds a hidden `payload-upload-sessions` collection, so it is DB-backed.
+  - Resume works through `ListParts` after a reload, by re-selecting the file.
+  - It defines an `@experimental` `uploadInstructions.segmented` adapter contract, implemented by S3 only, with a 64 MB default threshold.
+  - It supersedes #17005 in practice. The admin "upload on pick" UI is a follow-up PR (draft #19076).
 - **Seam for a third party:** register an admin provider with `setUploadHandler`, run our resumable upload, and return a `clientUploadContext`. The catch is that the receipt helpers come from `payload/internal`, which is "not part of the public API". The 6 h receipt TTL also limits resumed uploads that go through the admin form.
 
 ## Other hosts

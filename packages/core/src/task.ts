@@ -32,6 +32,12 @@ export type UploadStatus =
   | 'completed'
   /** Terminal unless `error.retryable` (then `task.retry()`). */
   | 'failed'
+  /**
+   * The session can no longer be resumed: the ticket expired, or the bucket already discarded the
+   * incomplete upload (lifecycle rule, provider cleanup). Never restarted silently: the UI must tell the
+   * user and `task.restart()` starts again from 0 % (owner decision, Q7). `error.code` says which case.
+   */
+  | 'expired'
   | 'canceled';
 
 export interface UploadProgress {
@@ -80,6 +86,11 @@ export interface UploadTask<TOutput = unknown, TError extends UploadErrorShape =
   resume(): void;
   /** Re-run after a retryable failure (resets the retry budget). */
   retry(): void;
+  /**
+   * Only on an `'expired'` task: starts a new session for the same file, from 0 %.
+   * Explicit by design: the SDK never re-sends bytes that were already sent without the app asking.
+   */
+  restart(): Promise<void>;
   /** Aborts the multipart upload on the server (best effort) and forgets local state. */
   cancel(options?: { keepRemote?: boolean }): Promise<void>;
   /** Attach the re-selected file to a `needs-file` task. Rejects with FILE_MISMATCH. */

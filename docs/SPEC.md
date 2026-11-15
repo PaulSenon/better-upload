@@ -39,7 +39,7 @@ const contract = uc.router({
     .input(z.object({ albumId: z.string() }))      // any Standard Schema
     .output(z.object({ mediaId: z.string() }))
     .errors({ QUOTA_EXCEEDED: { status: 403, data: z.object({ remainingBytes: z.number() }) } })
-    .resume({ ttl: '7d', verify: 'sample' })
+    .resume({ ttl: '7d', verify: 'auto' })
     .integrity({ partChecksum: 'auto' }),
   media: { download: uc.download().input(z.object({ mediaId: z.string() })) },
 });
@@ -105,8 +105,10 @@ The server keeps **no database**. Each session's facts — `sessionId, endpoint,
 meta, issuedAt, expiresAt, protocol version` — travel in a **session ticket** minted by the server. The storage is the
 source of truth for progress (`ListParts`) and completion (`HeadObject`).
 
-- Proposed ticket format: a standard compact **JWE (`dir` + `A256GCM`) or JWS** produced by a vetted library (e.g. `jose`),
-  not a custom format. JWE keeps `meta` and the key opaque to the client; JWS is simpler but readable (D-004).
+- Ticket format (D-004, chosen by Claude on the owner's delegation): a compact **JWE (`dir` + `A256GCM`)** produced by `jose`,
+  not a custom format. Opaque to the client (keys and server `meta` stay private), works on every target runtime, a few hundred
+  bytes (no part list). Server side it decodes to a typed `UploadTicketInfo` for the endpoint; client side and in a host DB it is
+  a plain `string`. A ticket presented to another endpoint is rejected with a typed error.
 - Secret rotation: `secret: [current, ...previous]` — first signs, all verify.
 - Expiry: `min(resume.ttl, provider cleanup window, lifecycle rule)`. `status` renews the ticket (sliding) up to the
   absolute `resume.ttl`.
@@ -188,7 +190,7 @@ default; `mode: 'fixed'` available.
 | 403 `AccessDenied` "Request has expired" / URL past `expiresAt` | `SIGNED_URL_EXPIRED` | re-`sign` immediately, does not consume an attempt |
 | 400 `BadDigest` / `InvalidDigest` | data changed or read error | re-read + re-hash once; then `FILE_MISMATCH` |
 | `NotReadableError` reading the Blob | `FILE_UNREADABLE` | pause; `userAction: 'reselect-file'` |
-| 404 `NoSuchUpload` | session gone | `status` → completed? finish : `SESSION_NOT_FOUND` (restart policy, D-010) |
+| 404 `NoSuchUpload` | session gone | `status` → completed? finish : `SESSION_NOT_FOUND` → task status `'expired'`, `userAction: 'restart'`; never restarted silently (D-010) |
 | 429 / 503 `SlowDown` | `STORAGE_THROTTLED` | honour `Retry-After`, halve concurrency |
 | 5xx | transient | backoff |
 | 401 from app server | `UNAUTHORIZED` | pause task (not fail), `userAction: 'sign-in'`, `retry()` after re-auth |
@@ -220,9 +222,21 @@ bytes between picks. Identity is therefore layered (`core/src/identity.ts`):
 2. **Plan match** — size must equal `plan.fileSize`.
 3. **Content proof** — re-checksum already-uploaded parts and compare with checksums **reported by the storage**
    (`status` → ListParts), per `resume.verify`:
-   - `metadata`: skip (fastest; unsafe if bytes may differ);
-   - `sample` *(proposed default)*: first, last uploaded, and k random uploaded parts (k = 3);
-   - `full`: all uploaded parts (bounded memory, O(uploaded bytes) CPU).
+   - `auto` *(default)*: `sample`, **escalated to `full`** when a cheap signal disagrees: `lastModified` or `type`
+     changed, several persisted sessions match, or the storage can't report checksums for the sampled parts;
+   - `metadata`: skip (fastest; unsafe if bytes may differ; opt-in only);
+   - `sample`: first, last uploaded, and k random uploaded parts (k = 3, random so no fixed blind spot);
+   - `full`: all uploaded parts (local read only, no network; bounded memory, O(uploaded bytes) CPU).
+
+   **Why this is "practically impossible to fool" at low cost (owner goal, round 2).**
+   - A *different* file (another video, an iOS re-encode) differs almost everywhere: it fails the size check or the first
+     sampled part. A false accept needs a CRC32C collision on every sampled part (≈ 2⁻³² each).
+   - The only case a sample could miss is a file **edited in place** in an unsampled region with the same size. Edits change
+     `lastModified`, which triggers `full` under `auto`.
+   - Bytes sent from now on are verified by the storage itself (signed per-part checksum), so transit corruption is impossible.
+   - Residual risk: deliberate tampering that also forges `lastModified` and size. That is the user's own file, so it is not a threat.
+   - Cost: `full` reads the already-uploaded bytes locally (estimate: seconds per GB on a phone; to be measured in phase 2), which is much cheaper than re-uploading
+     them. It shows as status `preparing` with progress.
 
 If any check fails → `FILE_MISMATCH` (`userAction: 'reselect-file'`), the session is not touched. Because the proof is
 against storage-side checksums, "same file" means exactly what is needed: **every byte already stored equals the
@@ -278,8 +292,24 @@ re-picks are detected (FILE_MISMATCH), not silently mixed.
 
 ## 14. Downloads (D1, D2, D3)
 
-Owner requirement (D3): **one link per user**, and if it fails the user just presses "retry" in the browser. Research:
-[research/downloads.md](./research/downloads.md). The proposal has three tiers.
+Owner requirements: D3 (**one link per user**; if it fails the user just presses "retry" in the browser) and D4 (**progressive
+enhancement**; a download must always be *possible*; resume is best effort and restarting from zero is acceptable; proxy only on
+Cloudflare; managed download in v1). Research: [research/downloads.md](./research/downloads.md).
+
+**Scope (D-021).**
+- **v0:** Tier 0. `link()` gives a plain `<a href>` that works with no JS and every browser, using `'redirect'` on any storage
+  and `'proxy'` only with the Cloudflare adapter (Worker + R2 binding).
+- **v1 (right after v0):** Tier 1. `download()` enhances that same link. When no sink fits (e.g. no OPFS quota left), it simply
+  navigates to the native link.
+
+The resulting behaviour per case:
+
+| Case | Retry | Resume of an interrupted download |
+|---|---|---|
+| `redirect`, URL still valid | ✅ | ✅ (browser manager) |
+| `redirect`, URL expired | ✅ (re-click mints a new URL) | ❌ restarts from 0 (accepted) |
+| `proxy` (Cloudflare) | ✅ | ✅ wherever the browser manager resumes |
+| managed (v1), FS Access / OPFS | ✅ | ✅ chunk-level |
 
 **Tier 0: native download manager (default).** `client.media.download.link({ input })` returns a **stable** URL,
 `GET {base}/media/download?mediaId=…`. It is per-user because each hit re-runs `resolve` with the app's own session/cookie.
@@ -291,10 +321,10 @@ For links shared without a session, the server can mint a sealed, expiring link 
     (commit 6ac869d). So `expiresIn` defaults to a generous value, capped at 7 d, and capped further by temporary credentials.
 - `delivery: 'proxy'` (opt-in): the stable link itself streams the bytes with `Range`/`If-Range` pass-through and a strong ETag.
   Resume works in every browser's manager, including iOS Safari.
-  - It is meant for edge runtimes next to the bucket: Cloudflare Worker + R2 means zero egress and cheap compute.
-  - It needs `StorageAdapter.getObject`.
+  - **Cloudflare only in v0** (owner decision): a Worker with an R2 binding, which means zero egress and no presigning.
+  - It needs `StorageAdapter.getObject`. On other storages `'proxy'` is a startup error rather than a silent fallback.
 
-**Tier 1: managed download (opt-in).** `client.media.download.download({ input, sink: 'auto' })`:
+**Tier 1: managed download (opt-in, v1).** `client.media.download.download({ input, sink: 'auto' })`:
 - fetches `Range` chunks in parallel in a worker, with an `If-Match`/`If-Range` validator. A `200` received where `206` was
   expected means the object changed, so the download restarts and never appends;
 - re-resolves on 403 and persists progress per chunk;

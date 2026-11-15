@@ -25,7 +25,7 @@ if (err?.code === 'QUOTA_EXCEEDED') {
   type _data = Expect<Equal<typeof err.data, { remainingBytes: number }>>;
 }
 if (err?.code === 'FILE_MISMATCH') {
-  err.userAction satisfies 'wait' | 'retry' | 'reselect-file' | 'sign-in' | 'change-file' | 'contact-support';
+  err.userAction satisfies 'wait' | 'retry' | 'reselect-file' | 'restart' | 'sign-in' | 'change-file' | 'contact-support';
 }
 // @ts-expect-error not a declared or built-in code
 if (err?.code === 'NOPE') {}

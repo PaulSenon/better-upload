@@ -40,13 +40,17 @@ export interface ResumePolicy {
    */
   readonly ttl: Duration;
   /**
-   * How a re-selected file is proven to be the same as the one partially uploaded:
-   *  - `'metadata'`: name + size + lastModified (+ type). Fast, can be fooled.
-   *  - `'sample'`  : metadata + re-checksum a bounded sample of already uploaded parts
-   *                  and compare with checksums the *storage* reports (ListParts).
-   *  - `'full'`    : re-checksum every already uploaded part. Bounded memory, O(uploaded bytes) CPU.
+   * How a re-selected file is proven to be the same as the one partially uploaded.
+   * Always compared against checksums the *storage* reports (ListParts), never against client claims.
+   *  - `'auto'` (default): `'sample'`, escalated to `'full'` when the cheap signals disagree
+   *                  (lastModified or type changed, several candidates, sample incomplete).
+   *                  Goal: a different file is practically never accepted, and the common case stays cheap.
+   *  - `'metadata'`: name + size + lastModified (+ type). Fast, can be fooled. Opt-in only.
+   *  - `'sample'`  : metadata + re-checksum first, last and k random already uploaded parts (no escalation).
+   *  - `'full'`    : re-checksum every already uploaded part. Local read only (no network), bounded memory,
+   *                  O(uploaded bytes) CPU — much cheaper than re-uploading, but not free on a phone.
    */
-  readonly verify: 'metadata' | 'sample' | 'full';
+  readonly verify: 'auto' | 'metadata' | 'sample' | 'full';
 }
 
 export type PartChecksumAlgorithm = 'none' | 'crc32' | 'crc32c' | 'crc64nvme' | 'sha1' | 'sha256';

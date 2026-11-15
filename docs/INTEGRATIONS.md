@@ -1,6 +1,6 @@
 # Host integrations (CMS, Convex, …): DESIGN DRAFT
 
-> Status: **proposal**. Nothing is decided and nothing is implemented. Requirement G5 (BRIEF addendum 2026-11-15).
+> Status: **proposal**. Nothing is decided and nothing is implemented. Requirements G5, H1, H2 (BRIEF addenda, 2026-11-15).
 > Research and sources: [research/hosts.md](./research/hosts.md).
 
 ## The problem
@@ -43,54 +43,101 @@ Each host concern maps onto an existing SDK seam. None of them needs a DB port.
 
 ## Sketches (illustrative only, not typed in this repo yet)
 
-### Payload CMS (future `@x/payload` plugin)
+### Payload CMS: compatible, with a docs page (D-033)
+
+**Status check (2026-11-15).** The owner remembered native support landing. It hasn't shipped yet, but it is close:
+- Payload team PR [#19325](https://github.com/payloadcms/payload/pull/19325) "feat(storage-s3): resumable upload sessions" was
+  **approved** on 2026-11-12. It targets `main`, which is the v4 line (v4.0.0-beta.9, 2026-11-13). The latest stable is 3.93.0,
+  which does not include it.
+- Its design (from the PR description):
+  - a **hidden `payload-upload-sessions` collection**, i.e. DB-backed: the opposite of our stateless ticket;
+  - S3 multipart for files ≥ 64 MB, with `ListParts` deciding which parts are missing;
+  - resume after a reload by re-selecting the file;
+  - an `@experimental` `uploadInstructions.segmented` adapter contract, implemented only by `@payloadcms/storage-s3`;
+  - completion through the existing receipt + create path;
+  - opportunistic cleanup of expired sessions.
+- The admin follow-up (start uploading on pick, finish saving in the background) is a separate PR. An older draft is
+  [#19076](https://github.com/payloadcms/payload/pull/19076).
+
+**Our stance.** Don't build a competing admin plugin. Instead:
+1. **v0: a docs page, "Use with Payload".** Mount the SDK router as Payload custom endpoints:
+   - the context comes from `req.user`;
+   - `authorize` reuses the collection's `create` access;
+   - `key` follows Payload's scheme;
+   - **receipt mode**: the client submits `{ filename, mimeType, filesize, receipt }` to the normal create, and a `beforeChange`
+     hook verifies it with `uploads.verifyReceipt()`.
+
+   This is for front-end apps (user uploads outside the admin), on Payload 3.x as well as 4.x.
+2. **Contribute where we add value** (owner approval needed before posting anything):
+   - Feedback on #19325 about **re-selected file identity**. Does it prove the re-picked file is the same, e.g. after an iOS
+     re-encode? Also per-part checksums, and R2's equal-part rule.
+   - Support for **non-S3 providers** through the `segmented` contract.
+3. **Revisit after Payload v4 is stable.** At that point the admin UI already has resumable uploads natively, and a plugin would
+   only make sense for providers or features that Payload lacks.
+
+Caveats for the docs page:
+- Large-file collections must avoid `imageSizes` and mime sniffing, otherwise Payload re-downloads the object.
+- Payload's own receipt helpers are in `payload/internal`, which is not public, so we mint our own.
+
+### Convex: an official multi-provider component (D-032)
+
+Owner goal: "like ConvexFS, but not tied to Bunny.net: multi-provider, with multipart upload and resilience."
+
+**Convex constraints that shape the design** (see [research/hosts.md](./research/hosts.md)):
+- Mutations can't make network calls; actions and HTTP actions can.
+- Components have sandboxed tables and **can't read environment variables**.
+- Documents are capped at 1 MiB.
+
+Hence:
+- The **storage credentials and S3 calls stay in app code.** An app-level HTTP action runs our Fetch handler.
+- The **component holds only data and functions**: tables plus queries and mutations.
+- Bytes never touch Convex.
 
 ```ts
-// payload.config.ts
-plugins: [
-  resumableUploads({
-    collections: { media: { endpoint: 'media' } },   // which upload collections get the resumable path
-    storage: s3Storage({ ... }),
-    contract,                                         // or generated per collection
-  }),
-]
+// convex/convex.config.ts
+import uploads from '@x/convex/convex.config';
+app.use(uploads);
+
+// convex/uploads.ts: app code, so it can read env and owns the credentials
+export const uploads = new Uploads(components.uploads, {
+  router,                                   // the same contract + router as on any other host
+  storage: s3Storage({ preset: 'r2', bucket: 'media', /* keys from process.env */ }),
+  context: async (ctx) => ({ user: await ctx.auth.getUserIdentity() }),
+});
+
+// convex/http.ts
+uploads.registerRoutes(http, { pathPrefix: '/api/upload/' });   // init/sign/status/complete/abort + download links
+
+// reactive queries for the UI, across devices
+export const myPending = query({ handler: (ctx) => uploads.listPending(ctx, { owner: '…' }) });
 ```
 
-What the plugin would do:
-- **Server side:**
-  - Mount the SDK router as a Payload endpoint (`/api/uploads/*`). The context is built from `req.user`, and `authorize` reuses the collection's `create` access.
-  - `key` follows Payload's own key scheme.
-  - Use the **receipt** mode: the admin form submits `{ filename, mimeType, size, receipt }`, and the plugin's `beforeChange` hook verifies it and fills `filename`, `filesize` and `mimeType`.
-- **Admin UI:** an admin provider registers `setUploadHandler({ collectionSlug, handler })`, the seam the official storage adapters use. It swaps the single-PUT client upload for our resumable multipart, with progress, pause and resume.
-- **Serving:** `generateURL` / `staticHandler` map to our stable download link.
-- **Caveats:**
-  - Payload's own receipt helpers live in `payload/internal`, which is not a public API, and expire after 6 h. Minting our own receipt avoids depending on them.
-  - Large-file collections must avoid `imageSizes` and mime sniffing, otherwise Payload re-downloads the whole object.
-  - Payload's open PR #17005 (S3 multipart client uploads, v4) is a coordination opportunity.
+**Component tables (★ on by default; D-032 open point):**
+- `uploads`: `sessionId`, `endpoint`, `owner`, sealed `ticket`, file descriptor, `status`
+  (`pending | completed | aborted | expired`), `expiresAt`.
+  - Written only at init, complete and abort: never per part, so writes stay cheap.
+  - Upload progress stays on the client.
+  - This is exactly the "host persists the ticket" path of D-005, which gives **cross-device resume and pending lists out of the box**.
+  - The core SDK still has no DB. In a Convex app, Convex *is* the host's DB.
+- `files` (optional): `key`, `size`, `contentType`, `checksum`, `owner`, `sessionId`. For apps that want a ConvexFS-like file
+  table instead of their own `onComplete` record.
 
-### Convex (future `@x/convex` component or helper)
+**Compared with ConvexFS:**
 
-```ts
-// convex/http.ts: the SDK server is a Fetch handler, and Convex HTTP actions are (Request) => Response
-http.route({ pathPrefix: '/api/upload/', method: 'POST',
-  handler: httpAction((ctx, req) => uploads.fetch(req, { convex: ctx })) });
+| | ConvexFS 0.3 | Our component (proposal) |
+|---|---|---|
+| Providers | Bunny.net only | Any S3-compatible (R2, AWS, B2, Tigris, MinIO…). Bunny later if its S3 API fits **[unverified]** |
+| Upload path | proxied through an HTTP action | direct browser → bucket, presigned multipart |
+| Resume | ✗ | ✓ over days, re-selected file verified (D-007), cross-device through the `uploads` table |
+| Commit | `commitFiles` within a 4 h TTL | inline `onComplete` (mutation), or receipt + `verifyReceipt` inside the host's mutation |
+| Auth hook | `uploadAuth → { allowed, maxBytes }` | `authorize` (typed `input`, typed errors, server `meta`) |
+| Downloads | 302 to a 1 h signed CDN URL | stable link → 302 to a fresh presigned URL; Cloudflare proxy optional |
+| GC | soft delete, ref-counted blobs, cron | app cron → `uploads.sweep(ctx)` action (abort expired multipart, optional orphan delete). Ref-counted dedup out of scope for v0 |
 
-// hooks call into the host's own mutations; S3 calls stay in the HTTP action
-authorize: async ({ context }) => {
-  const id = await context.convex.auth.getUserIdentity();
-  if (!id) throw ...;
-  return { ownerId: id.subject };
-},
-onInit:     ({ context, ticket, session }) => context.convex.runMutation(internal.uploads.pending, { ticket, sessionId: session.id }),
-onComplete: ({ context, session, object }) => context.convex.runMutation(internal.media.create, { sessionId: session.id, key: object.key, size: object.size }),
-```
-
-- **This fits Convex's constraints.** Network calls to S3 (create, sign, ListParts, complete) happen in the HTTP action. DB writes happen in mutations through `runMutation`. Bytes never touch Convex, so there is no 2-minute `generateUploadUrl` timeout, no proxying cost and no 1 MiB document worry: the part list stays in storage (`ListParts`), not in a document.
-- **Comparison with ConvexFS** (Jamie Turner's Bunny.net component):
-  - ConvexFS proxies bytes through an HTTP action (it counts real bytes, but has no multipart or resume) and uses a pending-upload table with a 4 h commit TTL.
-  - We keep direct-to-bucket multipart with resume, and borrow its **commit** idea (= receipt mode) and its **"auth hook returns `{ allowed, maxBytes }`"** shape.
-  - Its ref-counted blobs and GC are host features we would document, not own.
-- **The Convex wrapper would be thin:** typed helpers for the HTTP route, a schema snippet for a `pendingUploads` table if the host wants one, and the React hooks unchanged.
+Open points:
+- Component tables on by default, or opt-in?
+- Is ConvexFS-style path/ref-count file management in scope (later)?
+- Can components register crons **[unverified]**, or does the sweep stay app-side?
 
 ### Others
 
@@ -107,6 +154,8 @@ onComplete: ({ context, session, object }) => context.convex.runMutation(interna
 
 ## Open questions
 
-- **I1.** Which mode should the docs lead with: inline `onComplete`, or receipt/commit? Proposal: inline for apps, receipt for CMS plugins.
-- **I2.** Which official integrations come first after v0? Proposal: Payload first (concrete gap, active demand in PR #17005), then Convex.
-- **I3.** Should the Payload plugin take over the admin upload UI from day one, or start API-only?
+- **I1.** Which mode should the docs lead with: inline `onComplete`, or receipt/commit? Proposal: inline for apps; receipt for the Payload page.
+- **I2.** First official integration after v0? Proposal (revised): **Convex component first**, since Payload is getting native
+  resumable sessions in v4. Payload gets a docs page in v0.
+- ~~I3. Payload admin UI takeover~~: dropped, see D-033.
+- **I4.** Convex component: tables on by default (★) or opt-in?

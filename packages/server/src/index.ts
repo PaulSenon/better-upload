@@ -164,7 +164,8 @@ export interface DownloadTarget {
    *  - `'redirect'` (default): `GET` link → 302 → fresh presigned URL. Zero compute; retry always works,
    *    resume works until `expiresIn`.
    *  - `'proxy'`: the link streams the bytes itself (Range / If-Range pass-through). Resume works in every
-   *    browser download manager. Meant for edge runtimes next to the bucket (e.g. Worker + R2: no egress).
+   *    browser download manager. **v0: Cloudflare only** (Worker + R2 binding: no egress, no presigning).
+   *    On other storages it is a startup error, not a silent fallback (owner decision, round 2).
    */
   readonly delivery?: 'redirect' | 'proxy';
 }

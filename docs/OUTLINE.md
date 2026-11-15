@@ -1,7 +1,7 @@
 # Outline & targeted questions (phase 1)
 
 > Purpose: to reach a common understanding before any implementation. Every answer updates [DECISIONS.md](./DECISIONS.md).
-> Question statuses: **OPEN** (unanswered) · **ANSWERED** (owner replied; decision updated). Round 1 answers received 2026-11-15 (see DECISIONS feedback log).
+> Question statuses: **OPEN** (unanswered) · **ANSWERED** (owner replied; decision updated). Round 1 and round 2 answers received 2026-11-15 (see DECISIONS feedback log).
 
 ## Phase plan
 
@@ -19,21 +19,21 @@
 - **The developer owns the bucket.** The SDK is "UploadThing-like DX without UploadThing". A hosted service is never required.
 - **The hard requirement is the iPhone, multi-day, intermittent case.** It is what drives part size, resume, identity and limits. Desktop is the easy case.
 - **"Type-safe" means four things.** Endpoint names, `input`, `output` and typed errors are inferred end to end from one contract. A missing server implementation is a compile error.
-- **Minimal infra by default.** The default is stateless: a signed token plus storage as the truth. A DB is optional and only needed for explicit capabilities.
+- **No DB in the SDK, ever.** Stateless: a sealed ticket plus storage as the truth. The host app may persist the ticket in its own DB if it wants cross-device resume.
 - **UI is copy-in components, not a styled npm package.**
 
 ## Targeted questions
 
 | # | Question | Why it matters | Recommendation | Status |
 |---|---|---|---|---|
-| Q1 | **Name:** keep "Better Upload" until release, or pick a new name now? Candidates whose npm name is free: `relay-upload`, `ferry-upload`, `uplift-upload`, `@upkit/*` scope (unverified). | The `@better-upload` scope and brand are taken by an active project with the same scope. Renaming late is costly. | Pick before phase 2. | ANSWERED (rename if established player — it is) |
+| Q1 | **Name:** keep "Better Upload" until release, or pick a new name now? Candidates whose npm name is free: `relay-upload`, `ferry-upload`, `uplift-upload`, `@upkit/*` scope (unverified). | The `@better-upload` scope and brand are taken by an active project with the same scope. Renaming late is costly. | Pick before phase 2. | ANSWERED (rename if established player — it is). Round 2: name search welcome, not critical → [research](./research/better-upload-and-naming.md) |
 | Q2 | **Server recovery when the browser has lost its local state** (Safari ITP deletes storage after 7 days without visiting the site; also another device): is this a v0 must? | If yes, `SessionStore` stops being optional for that feature, and we need a recipe (SQL/KV) and a lookup by fingerprint. | v0 ships the port and a memory store. The README explains how to add a DB for this. | ANSWERED (no DB; host may persist ticket) |
 | Q3 | **Builder chain or config object** for the contract (D-002)? | DX taste. It affects every README example. | Builder (oRPC-like). | ANSWERED (oRPC style) |
-| Q4 | **Token: JWE (opaque) or JWS (readable)** (D-004)? Is a DB-reference token acceptable as the default instead? | Privacy of `meta`/keys versus simplicity and debuggability. | JWE through `jose`. | EXPLAINED → internal default proposed |
-| Q5 | **Default file-identity verification** on resume: `sample` or `full` (D-007)? | `full` re-reads everything already uploaded, which on a phone means battery and time. `sample` could in theory miss a localized difference. | `sample`, with `full` per endpoint for high-value data. | EXPLAINED → internal default proposed |
-| Q6 | **AWS SDK v3 or a lightweight signer** (D-009)? | Edge compatibility and bundle size versus maturity and credential chains. | Lightweight signer, with credential providers pluggable. | EXPLAINED → internal default proposed |
-| Q7 | **Lost session behaviour** (D-010): restart automatically or ask the user? | Metered mobile data while travelling. | Ask. | EXPLAINED → re-ask |
-| Q8 | **Downloads in v0:** a managed ranged download into OPFS, or signed URLs only (D-021)? | Scope and effort. The upload side is the priority of the brief. | Both, but managed download is minimal (single file, OPFS or memory). | RESEARCHED → proposal in SPEC §14 |
+| Q4 | **Token: JWE (opaque) or JWS (readable)** (D-004)? Is a DB-reference token acceptable as the default instead? | Privacy of `meta`/keys versus simplicity and debuggability. | JWE through `jose`. | ANSWERED round 2: delegated to Claude → JWE via `jose` (D-004) |
+| Q5 | **Default file-identity verification** on resume: `sample` or `full` (D-007)? | `full` re-reads everything already uploaded, which on a phone means battery and time. `sample` could in theory miss a localized difference. | `sample`, with `full` per endpoint for high-value data. | ANSWERED round 2: goal agreed (different file practically never accepted, cheap) → `verify: 'auto'` (D-007) |
+| Q6 | **AWS SDK v3 or a lightweight signer** (D-009)? | Edge compatibility and bundle size versus maturity and credential chains. | Lightweight signer, with credential providers pluggable. | ANSWERED round 2: minimal signer (D-009) |
+| Q7 | **Lost session behaviour** (D-010): restart automatically or ask the user? | Metered mobile data while travelling. | Ask. | ANSWERED round 2: restart from zero **and tell the user** (D-010) |
+| Q8 | **Downloads in v0:** a managed ranged download into OPFS, or signed URLs only (D-021)? | Scope and effort. The upload side is the priority of the brief. | Both, but managed download is minimal (single file, OPFS or memory). | ANSWERED round 2: delegated; progressive enhancement; proxy only on Cloudflare; managed download in v1 (D-021) |
 | Q9 | **Target providers for CI** in phase 2 (AWS, R2, MinIO, B2, GCS XML, others)? | Each one has quirks: R2 needs equal parts, MinIO cleans up after 24h, GCS has no preconditions. | MinIO in CI, plus R2 and AWS in a manual or nightly matrix. | DEFERRED |
 | Q10 | **Batch semantics:** is a batch-level "all files done" hook (an album) needed in v0 (D-016)? | It changes server state needs: you must know when every file of the batch has completed. | Not in v0. The app tracks it. | OPEN |
 | Q11 | **Runtime targets** besides the browser: React Native, Node CLI, Electron? | Transport and file abstraction (`UploadableFile`). | Keep the abstraction; test only the browser in v0. | OPEN |

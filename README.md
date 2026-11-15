@@ -67,7 +67,7 @@ export const contract = uc.router({
     .input(z.object({ albumId: z.string().uuid() }))
     .output(z.object({ mediaId: z.string() }))
     .errors({ QUOTA_EXCEEDED: { status: 403, data: z.object({ remainingBytes: z.number() }) } })
-    .resume({ ttl: '7d', verify: 'sample' })
+    .resume({ ttl: '7d', verify: 'auto' })
     .integrity({ partChecksum: 'auto' }),
 
   media: {
@@ -248,10 +248,14 @@ for (const task of pending) {                     // status: 'needs-file'
 How "same file" is decided:
 1. Name, size, `lastModified` and type select a candidate.
 2. The size must match the session's part plan.
-3. A sample of the parts already uploaded (or all of them, with `verify: 'full'`) is re-checksummed in a worker and compared
-   with the checksums **the storage** reports.
+3. A sample of the parts already uploaded is re-checksummed in a worker and compared with the checksums **the storage** reports.
+   With the default `verify: 'auto'`, the check widens to every uploaded part when a cheap signal disagrees, e.g. the file's
+   `lastModified` changed. This is a local read, with no network.
 
-Nothing is appended until the bytes are proven equal. This matters on iOS, where re-picking from the Photos library can
+Nothing is appended until the bytes are proven equal.
+
+If the session can't be resumed any more (the ticket expired, or the bucket already discarded the half-upload), the task becomes
+`'expired'`. Your UI tells the user, and `task.restart()` starts again from 0 %. The SDK never does this silently. This matters on iOS, where re-picking from the Photos library can
 deliver a transcoded file.
 
 ### Reliability features
@@ -290,12 +294,15 @@ Built-in codes include `NETWORK_ERROR`, `OFFLINE`, `SIGNED_URL_EXPIRED`, `SESSIO
 // Each hit re-authorizes with the user's session, then redirects to a fresh presigned URL (or streams it, in 'proxy' mode).
 // If it fails, the user just clicks again or presses "retry" in the browser.
 
-// Tier 1 (opt-in): managed, parallel, resumable download into the best local sink, e.g. for progress UI or decryption.
+// Tier 1 (opt-in, planned for v1): progressively enhances the same link with a managed, parallel, resumable download
+// into the best local sink (progress UI, decryption). Falls back to the native link where no sink fits.
 const dl = client.media.download.download({ input: { mediaId }, sink: 'auto' });
 ```
 
-- In `'redirect'` mode (zero infra), resuming an interrupted download works while the presigned URL is valid. Browsers resume against the final URL.
-- In `'proxy'` mode (an edge function next to the bucket, e.g. Worker + R2), resuming works in every browser.
+Downloads are designed as progressive enhancement. A download must always be *possible*, and resuming is best effort.
+- **`'redirect'` mode** (the default, any storage, zero infra): resuming an interrupted download works while the presigned URL is
+  valid, because browsers resume against the final URL. After that, a retry restarts from zero.
+- **`'proxy'` mode** (Cloudflare Worker + R2 binding only): resuming works wherever the browser's download manager supports it.
 
 A download is **not** a mirror of a multipart upload. There is no server-side session to complete or abort and nothing billed while
 paused, but resume depends on validators (ETag or versionId) and on where the browser keeps the bytes. See [SPEC §14](./docs/SPEC.md#14-downloads-d1-d2-d3).
@@ -328,8 +335,13 @@ The hooks are thin `useSyncExternalStore` bindings over the client stores, so th
 
 The SDK moves bytes and owns nothing else. Auth comes from your context factory. Your hooks decide keys and IDs, write your
 records, and optionally store the portable ticket. Records are created either inline in `onComplete`, or later from a sealed
-**receipt** that your CMS verifies with `uploads.verifyReceipt()`. Sketches for Payload and Convex are in
-[docs/INTEGRATIONS.md](./docs/INTEGRATIONS.md).
+**receipt** that your CMS verifies with `uploads.verifyReceipt()`.
+
+Planned integrations:
+- an official **Convex component**: multi-provider, resumable, with reactive pending-upload lists;
+- a **"Use with Payload"** docs page. Payload is getting its own resumable S3 sessions in v4.
+
+Details are in [docs/INTEGRATIONS.md](./docs/INTEGRATIONS.md).
 
 ## Bucket setup
 
@@ -385,12 +397,13 @@ Sources: [docs/research/prior-art.md](./docs/research/prior-art.md).
 ```
 docs/BRIEF.md              original request, verbatim + requirement IDs
 docs/OUTLINE.md            intentions, phase plan, targeted questions
-docs/DECISIONS.md          decision log with statuses (all PROPOSED / OPEN)
+docs/DECISIONS.md          decision log with statuses (PROPOSED / OPEN / AGREED…, nothing ACCEPTED yet)
 docs/SPEC.md               protocol, state, engine, identity, limits, downloads
 docs/NAMING.md             name collisions
-docs/INTEGRATIONS.md       CMS / Convex integration model (Payload, Convex sketches)
+docs/INTEGRATIONS.md       host integration model (Convex component, Payload docs page)
+docs/proposals/            drafts for upstream contributions (not posted)
 docs/E2EE-PERSPECTIVE.md   future encrypted transfer demonstrator (not in scope)
-docs/research/             sourced research notes (dated 2026-11-12)
+docs/research/             sourced research notes (dated 2026-11-12 / 2026-11-15)
 packages/*/src             TypeScript interfaces only (declare-only, no runtime)
 examples/basic             contract / server / client / React examples (type-checked)
 type-tests                 inference and @ts-expect-error tests
