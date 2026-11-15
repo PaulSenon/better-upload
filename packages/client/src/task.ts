@@ -135,6 +135,8 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
   #confirmed = new Map<number, number>();
   #inflight = new Map<number, number>();
   #checksums = new Map<number, string>();
+  /** Checksums being computed ahead of the network (worker pool), keyed by part number. */
+  #hashing = new Map<number, Promise<string>>();
   #signed = new Map<number, SignedRequest>();
   #concurrency: Concurrency;
   #run: AbortController | undefined;
@@ -216,6 +218,7 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
     this.#session = undefined;
     this.#confirmed.clear();
     this.#checksums.clear();
+    this.#hashing.clear();
     this.#signed.clear();
     this.#error = undefined;
     this.#resumed = false;
@@ -244,6 +247,14 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
     } else if (this.#source.kind === 'record') {
       await this.#deps.store?.delete(this.#source.record.id).catch(() => {});
     }
+  }
+
+  /** Internal: another task took over this restored session. Settles silently, no network, record kept. */
+  detach(): void {
+    this.#stopRun();
+    this.#status = 'canceled';
+    this.#finish(UploadError.builtin('CANCELED', { message: 'Continued by another upload of the same file' }));
+    this.#emit();
   }
 
   async attachFile(file: UploadableFile): Promise<void> {
@@ -380,6 +391,7 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
         this.#session = undefined;
         this.#confirmed.clear();
         this.#checksums.clear();
+        this.#hashing.clear();
         this.#source = { kind: 'new', init: source.fallback };
         this.#resumed = false;
         return this.#establishSession(signal);
@@ -432,14 +444,59 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
       return;
     }
     const toCheck: WirePart[] = mode === 'full' ? uploaded : sample(uploaded, 3);
-    for (const part of toCheck) {
-      signal.throwIfAborted();
-      if (!part.checksum) continue;
-      const { start, end } = partRange(plan, part.partNumber);
-      const checksum = await this.#readChecksum(file.slice(start, end), plan, signal);
-      if (checksum !== part.checksum) throw mismatch(`Part ${part.partNumber} differs from the uploaded bytes`);
-      this.#checksums.set(part.partNumber, checksum);
+    // Parts are hashed in parallel by the worker pool; the first mismatch stops the check.
+    const verifying = new AbortController();
+    const stop = () => verifying.abort(signal.reason);
+    signal.addEventListener('abort', stop, { once: true });
+    try {
+      await Promise.all(
+        toCheck.map(async (part) => {
+          if (!part.checksum) return;
+          const { start, end } = partRange(plan, part.partNumber);
+          const checksum = await this.#readChecksum(file.slice(start, end), plan, verifying.signal);
+          if (checksum !== part.checksum) {
+            verifying.abort();
+            throw mismatch(`Part ${part.partNumber} differs from the uploaded bytes`);
+          }
+          this.#checksums.set(part.partNumber, checksum);
+        }),
+      );
+    } finally {
+      signal.removeEventListener('abort', stop);
     }
+    signal.throwIfAborted();
+  }
+
+  /** Checksum of one part, computed once (and possibly ahead of time by {@link #hashAhead}). */
+  #checksumOf(partNumber: number, signal: AbortSignal): Promise<string> {
+    const known = this.#checksums.get(partNumber);
+    if (known !== undefined) return Promise.resolve(known);
+    let pending = this.#hashing.get(partNumber);
+    if (!pending) {
+      const plan = this.#session!.plan;
+      const { start, end } = partRange(plan, partNumber);
+      pending = this.#readChecksum(this.#file!.slice(start, end), plan, signal).then(
+        (value) => {
+          this.#checksums.set(partNumber, value);
+          this.#hashing.delete(partNumber);
+          return value;
+        },
+        (error) => {
+          this.#hashing.delete(partNumber);
+          throw error;
+        },
+      );
+      pending.catch(() => {});
+      this.#hashing.set(partNumber, pending);
+    }
+    return pending;
+  }
+
+  /** Starts hashing the next parts while earlier ones are on the network, so hashing is off the critical path. */
+  #hashAhead(queue: readonly number[], signal: AbortSignal) {
+    if (this.#session?.plan.checksum === 'none') return;
+    for (const partNumber of queue.slice(0, this.#concurrency.current + 2))
+      void this.#checksumOf(partNumber, signal).catch(() => {});
   }
 
   async #readChecksum(blob: Blob, plan: PartPlan, signal: AbortSignal): Promise<string> {
@@ -472,6 +529,7 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
         if (queue.length === 0 && active === 0) return resolve();
         while (active < this.#concurrency.current && queue.length > 0) {
           const partNumber = queue.shift()!;
+          this.#hashAhead(queue, signal);
           active++;
           this.#uploadPart(partNumber, signal).then(
             () => {
@@ -501,11 +559,7 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
     while (attempt < retry.maxAttempts) {
       signal.throwIfAborted();
       await this.#waitOnline(signal);
-      let checksum = this.#checksums.get(partNumber);
-      if (checksum === undefined) {
-        checksum = await this.#readChecksum(blob, plan, signal);
-        this.#checksums.set(partNumber, checksum);
-      }
+      const checksum = await this.#checksumOf(partNumber, signal);
       const request = await this.#signedRequest(partNumber, checksum, signal);
       this.#inflight.set(partNumber, 0);
       this.#emitThrottled();

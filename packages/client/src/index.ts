@@ -6,3 +6,4 @@ export { createNetworkMonitor, type NetworkMonitor } from './network.js';
 export { indexedDBStore, memoryStore } from './persistence.js';
 export { fetchTransport, xhrTransport } from './transport.js';
 export * from './types.js';
+export { hashWorkerSource, type WorkerHasherOptions, workerHasher } from './worker-hasher.js';

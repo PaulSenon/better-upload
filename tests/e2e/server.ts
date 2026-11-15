@@ -88,6 +88,15 @@ http
         if (session.uploadId) await storage.abortMultipartUpload({ key: session.key, uploadId: session.uploadId });
         return json(res, 200, { ok: true });
       }
+      if (url.pathname === '/__test/multipart') {
+        // In-progress multipart uploads under a prefix (to check that cancel aborted them).
+        const r = await storage.client.request({
+          method: 'GET',
+          query: { uploads: '', prefix: url.searchParams.get('prefix') ?? '' },
+        });
+        const xml = await r.text();
+        return json(res, 200, { uploads: [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map((m) => m[1]) });
+      }
       if (url.pathname === '/__test/object') {
         const key = url.searchParams.get('key')!;
         const signed = await storage.signGetObject({ key, expiresIn: 60 });

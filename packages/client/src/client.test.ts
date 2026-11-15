@@ -216,6 +216,20 @@ describe('upload client', () => {
     expect(second.puts.sort()).toEqual([2, 3]);
   });
 
+  it('upload() of the same file takes over a restored task waiting for it', async () => {
+    const first = setup({ fault: ({ partNumber }) => (partNumber >= 2 ? 'network' : undefined) });
+    const file = makeFile(20 * MiB, 21);
+    await settle(first.client.videos.upload(file, { input: { albumId: 'a' } }), ['failed']);
+    const second = setup({ storage: first.storage, persistence: first.persistence });
+    const [pending] = await second.client.videos.pending();
+    expect(pending?.getSnapshot().status).toBe('needs-file');
+    const task = second.client.videos.upload(file, { input: { albumId: 'a' } });
+    await task.result;
+    expect(task.getSnapshot().resumed).toBe(true);
+    expect(second.puts.sort()).toEqual([2, 3]);
+    expect(second.client.$tasks.getSnapshot()).not.toContain(pending);
+  });
+
   it('marks an upload discarded by the storage as expired and restarts only on request', async () => {
     const env = setup({ fault: ({ partNumber }) => (partNumber >= 2 ? 'network' : undefined) });
     const file = makeFile(20 * MiB);

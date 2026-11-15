@@ -12,7 +12,6 @@ import {
   type UploadContract,
 } from '@open-upload/core';
 import { createControlTransport } from './control.js';
-import { chunkedHasher } from './hasher.js';
 import { createNetworkMonitor } from './network.js';
 import { defaultStore } from './persistence.js';
 import { describeFile, type EngineDeps, type TaskSource, UploadTaskImpl } from './task.js';
@@ -25,6 +24,7 @@ import type {
   UploadClientOptions,
   UploadTask,
 } from './types.js';
+import { workerHasher } from './worker-hasher.js';
 
 const RESERVED = new Set(['$tasks', '$restore', '$pauseAll', '$resumeAll', '$dispose', 'then', 'toJSON']);
 
@@ -54,7 +54,7 @@ export function createUploadClient<T extends ContractRouter>(options: UploadClie
     baseUrl,
     control,
     transport: options.transport ?? defaultTransport(),
-    hasher: options.hasher ?? chunkedHasher(),
+    hasher: options.hasher ?? workerHasher(),
     store,
     network,
     retry: { maxAttempts: 10, baseDelayMs: 500, maxDelayMs: 30_000, ...options.retry },
@@ -91,6 +91,12 @@ export function createUploadClient<T extends ContractRouter>(options: UploadClie
 
   /** Persisted records already attached to a live task (restored, or matched by `upload()`). */
   const claimed = new Set<string>();
+  /** Restored tasks (by record id) still waiting for their file. */
+  const restoredTasks = new Map<string, UploadTaskImpl<any>>();
+  const restoredWaiting = (id: string) => {
+    const task = restoredTasks.get(id);
+    return task && tasks.has(task) && task.getSnapshot().status === 'needs-file' ? task : undefined;
+  };
 
   function uploadEndpoint(path: string) {
     const rules = rulesOf(path);
@@ -140,10 +146,19 @@ export function createUploadClient<T extends ContractRouter>(options: UploadClie
             ...(files.length === 1
               ? {
                   match: async () => {
-                    const match = (await records(path)).find(
-                      (r) => r.file.size === file.size && r.file.name === file.name && !claimed.has(r.id),
-                    );
-                    if (match) claimed.add(match.id);
+                    const match = (await records(path)).find((r) => {
+                      if (r.file.size !== file.size || r.file.name !== file.name) return false;
+                      // A restored task still waiting for its file can be taken over by this upload.
+                      return !claimed.has(r.id) || restoredWaiting(r.id) !== undefined;
+                    });
+                    if (!match) return undefined;
+                    const waiting = restoredWaiting(match.id);
+                    if (waiting) {
+                      tasks.delete(waiting);
+                      waiting.detach();
+                      notifyTasks();
+                    }
+                    claimed.add(match.id);
                     return match;
                   },
                 }
@@ -210,16 +225,16 @@ export function createUploadClient<T extends ContractRouter>(options: UploadClie
       }
       if (claimed.has(record.id)) continue;
       claimed.add(record.id);
-      restored.push(
-        track(
-          new UploadTaskImpl(deps, {
-            endpoint: record.endpoint,
-            file: undefined,
-            input: record.input,
-            source: { kind: 'record', record },
-          }),
-        ),
+      const task = track(
+        new UploadTaskImpl(deps, {
+          endpoint: record.endpoint,
+          file: undefined,
+          input: record.input,
+          source: { kind: 'record', record },
+        }),
       );
+      restoredTasks.set(record.id, task);
+      restored.push(task);
     }
     return restored;
   }

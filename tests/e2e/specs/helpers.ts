@@ -15,9 +15,14 @@ export function bytes(size: number, seed: number): Buffer {
   if (hit) return hit;
   const out = Buffer.allocUnsafe(size);
   let x = seed >>> 0;
-  for (let i = 0; i < size; i += 4) {
+  let i = 0;
+  for (; i + 4 <= size; i += 4) {
     x = (x * 1664525 + 1013904223) >>> 0;
-    out.writeUInt32LE(x, Math.min(i, size - 4) === i ? i : size - 4);
+    out.writeUInt32LE(x, i);
+  }
+  for (; i < size; i++) {
+    x = (x * 1664525 + 1013904223) >>> 0;
+    out[i] = x >>> 24;
   }
   cache.set(id, out);
   return out;

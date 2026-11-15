@@ -16,6 +16,11 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./hash-worker": {
+      "source": "./src/hash-worker.ts",
+      "types": "./dist/hash-worker.d.ts",
+      "default": "./dist/hash-worker.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
