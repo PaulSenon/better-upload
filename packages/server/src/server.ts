@@ -188,6 +188,7 @@ export function createUploadServer<T extends ContractRouter, TCtx extends object
     id: t.sid,
     endpoint: t.ep,
     key: t.key,
+    ...(t.uid ? { uploadId: t.uid } : {}),
     file: t.file,
     plan: t.plan,
     meta: t.meta,

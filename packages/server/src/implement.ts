@@ -78,6 +78,8 @@ export interface UploadSession<TMeta = unknown> {
   readonly endpoint: string;
   /** Object key in the bucket (as returned by `onUploadRequested`, without the adapter's `keyPrefix`). */
   readonly key: string;
+  /** Storage multipart upload id (absent for single-PUT sessions). */
+  readonly uploadId?: string;
   readonly file: FileDescriptor;
   readonly plan: PartPlan;
   /** Server-only data returned by `onUploadRequested`. Sealed (encrypted) in the ticket: keep it small. */

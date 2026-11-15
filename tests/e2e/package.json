@@ -1,0 +1,30 @@
+{
+  "name": "@bu-draft/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --conditions=source server.ts",
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bu-draft/client": "workspace:*",
+    "@bu-draft/core": "workspace:*",
+    "@bu-draft/react": "workspace:*",
+    "@bu-draft/s3": "workspace:*",
+    "@bu-draft/server": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "^6.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}
