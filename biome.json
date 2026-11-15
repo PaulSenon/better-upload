@@ -11,7 +11,10 @@
       "!**/routeTree.gen.ts",
       "!**/public/r",
       "!**/test-results",
-      "!**/playwright-report"
+      "!**/playwright-report",
+      "!**/*.md",
+      "!**/*.mdx",
+      "!apps/web/src/styles/app.css"
     ]
   },
   "css": { "parser": { "tailwindDirectives": true } },
