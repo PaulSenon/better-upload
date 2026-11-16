@@ -13,7 +13,7 @@ import { cpSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cloudflare from '@alchemy.run/cloudflare-runtime/vite';
-import { createBuilder } from 'vite';
+import { createBuilder, type Plugin } from 'vite';
 
 export const COMPATIBILITY_DATE = '2026-11-01';
 
@@ -23,11 +23,32 @@ if (process.env.VITE_SITE_URL) process.env.VITE_SITE_URL = process.env.VITE_SITE
 // Tells Alchemy's plugin it is the injected one (and disables a second Cloudflare plugin from the config).
 process.env.ALCHEMY_CLOUDFLARE_VITE_INJECTED = '1';
 const root = fileURLToPath(new URL('..', import.meta.url));
+
+/**
+ * Alchemy's Cloudflare plugin resolves the Worker environment with `workerd, worker, module, browser` (Cloudflare's
+ * defaults), and Vite concatenates condition arrays, so a config override cannot drop one. `browser` makes packages
+ * with a server/browser split ship their BROWSER build in the Worker: fumadocs-core's `./server` resolves to a stub
+ * that throws "renderToMarkdown is only available on the server", so /api/search fails at request time (500).
+ * This removes `browser` from the server environment only; the client build is untouched.
+ */
+function serverConditions(): Plugin {
+  return {
+    name: 'open-upload:worker-without-browser-condition',
+    enforce: 'post',
+    configEnvironment(name, config) {
+      if (name === 'client' || !config.resolve?.conditions) return;
+      config.resolve.conditions = config.resolve.conditions.filter((c) => c !== 'browser');
+    },
+  };
+}
+
+// Start from an empty dist/: a previous build's chunks must never end up in the Worker.
+rmSync(join(root, 'dist'), { recursive: true, force: true });
 const builder = await createBuilder(
   {
     root,
     // nodejs_compat is on by default from 2026-08-04; the build tooling still needs it spelled out for unenv.
-    plugins: [cloudflare({ compatibilityDate: COMPATIBILITY_DATE, compatibilityFlags: ['nodejs_compat'] })],
+    plugins: [cloudflare({ compatibilityDate: COMPATIBILITY_DATE, compatibilityFlags: ['nodejs_compat'] }), serverConditions()],
   },
   null,
 );
@@ -35,7 +56,6 @@ await builder.buildApp();
 
 const dist = join(root, 'dist');
 const deploy = join(dist, 'deploy');
-rmSync(deploy, { recursive: true, force: true });
 cpSync(join(dist, 'client'), join(deploy, 'assets'), { recursive: true });
 cpSync(join(dist, 'server'), join(deploy, 'server'), {
   recursive: true,

@@ -52,6 +52,8 @@ async function serve(b: Behaviour): Promise<{ url: string; server: Server }> {
       res.writeHead(200, { ...headers, "cache-control": b.mutableAssets ? "public, max-age=0" : IMMUTABLE_CACHE_CONTROL }).end("1");
     } else if (path === "/r/demo.json") {
       res.writeHead(200, { ...headers, "content-type": b.registryAsHtml ? "text/html" : "application/json", "cache-control": REGISTRY_CACHE_CONTROL[b.indexable ? "production" : "preview"] }).end(REGISTRY_ITEM);
+    } else if (path === "/api/search" && !b.noWorker) {
+      res.writeHead(200, { "content-type": "application/json" }).end("[]");
     } else if (path === "/llms.txt" && !b.noWorker) {
       res.writeHead(200, { "content-type": "text/plain" }).end("# site\n- /docs\n");
     } else {

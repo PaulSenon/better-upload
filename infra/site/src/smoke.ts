@@ -134,6 +134,13 @@ export async function runSmoke(options: SmokeOptions): Promise<SmokeResult> {
     const text = await res.text();
     if (res.status !== 200 || !text.includes("/docs")) failures.push(`/llms.txt → ${res.status} (the Worker script did not answer)`);
     else checks.push("/llms.txt → 200 from the Worker script");
+    // Search runs the docs index and the markdown renderer inside the Worker: catches a server
+    // bundle that resolved browser builds or left bare imports (both only fail at request time).
+    const search = await get("api/search?query=upload");
+    const body = await search.text();
+    if (search.status !== 200 || !search.headers.get("content-type")?.includes("json")) {
+      failures.push(`/api/search → ${search.status}: ${body.slice(0, 160).replace(/\s+/g, " ")}`);
+    } else checks.push("/api/search → 200 JSON from the Worker script");
   }
 
   // 7. Clean URLs (html_handling "drop-trailing-slash"): a prerendered page directory is served
