@@ -7,7 +7,10 @@
  *
  * dist/deploy holds only what is uploaded (server/: .js modules only, no source maps): it is the CI artifact.
  *
- * Keep COMPATIBILITY_DATE in sync with infra/site/src/stage.ts.
+ * Keep COMPATIBILITY_DATE in sync with compatibility.date in infra/site/alchemy.run.ts (delivery kit).
+ *
+ * Derived from the same script as the kit's recipe (template/recipes/build-worker.ts, v0.1.2); local differences:
+ * SITE_URL → VITE_SITE_URL (the prerendered install commands show the stage's own origin) and a fixed dist/deploy.
  */
 import { cpSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
