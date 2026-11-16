@@ -48,7 +48,10 @@ const builder = await createBuilder(
   {
     root,
     // nodejs_compat is on by default from 2026-08-04; the build tooling still needs it spelled out for unenv.
-    plugins: [cloudflare({ compatibilityDate: COMPATIBILITY_DATE, compatibilityFlags: ['nodejs_compat'] }), serverConditions()],
+    plugins: [
+      cloudflare({ compatibilityDate: COMPATIBILITY_DATE, compatibilityFlags: ['nodejs_compat'] }),
+      serverConditions(),
+    ],
   },
   null,
 );
