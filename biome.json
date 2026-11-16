@@ -15,7 +15,9 @@
       "!**/playwright-report",
       "!**/*.md",
       "!**/*.mdx",
-      "!apps/web/src/styles/app.css"
+      "!apps/web/src/styles/app.css",
+      "!infra/site",
+      "!tooling/release"
     ]
   },
   "css": { "parser": { "tailwindDirectives": true } },

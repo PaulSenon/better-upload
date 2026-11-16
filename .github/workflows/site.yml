@@ -1,0 +1,122 @@
+# Docs + registry site (apps/web): the UNPRIVILEGED half of the pipeline. Builds, checks and
+# smoke-tests the site without any secret, and uploads the prebuilt Worker as an artifact
+# (manifest.json + site/assets + site/server). Deploys live in site-deploy.yml, which runs from
+# main (workflow_run) and treats this run's artifact and payload as untrusted. Design and setup:
+# docs/SITE-DEPLOY.md.
+#
+# This workflow runs PR code (including forks): read-only token, no secret, no environment, no
+# cache. Editing it in a PR cannot reach any deploy credential.
+name: site
+
+on:
+  pull_request:
+    # closed / converted_to_draft only complete the run so site-deploy can tear the preview down.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed]
+  push:
+    branches: [main]
+  workflow_dispatch: # rebuild main; site-deploy then redeploys production
+
+permissions: {}
+
+env:
+  DO_NOT_TRACK: "1" # Alchemy CLI telemetry (otel.alchemy.run) off
+  ALCHEMY_TELEMETRY_DISABLED: "1"
+  ALCHEMY_PLAIN: "1"
+
+jobs:
+  build:
+    name: site-build
+    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && github.event.action != 'converted_to_draft')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    cache-mode: none # its artifact is what production serves
+    concurrency:
+      group: site-build-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - id: stage
+        name: Stage
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SUBDOMAIN: ${{ vars.SITE_WORKERS_SUBDOMAIN }}
+          PREVIEW_MODE: ${{ vars.SITE_PREVIEW_MODE }}
+          SUBDOMAIN_OPTIONAL: "1" # before Cloudflare is configured: the stage is enough
+        run: node infra/site/scripts/cli.ts target
+      - run: pnpm --filter @open-upload/web typecheck
+      # The same Vite build Alchemy's Website.Vite runs inside `alchemy deploy`, without credentials:
+      # apps/web/dist/deploy = assets/ + server/ (Worker modules, uploaded as is by site-deploy).
+      - name: Build the site for Workers
+        run: pnpm --filter @open-upload/web build:worker
+      - name: Check the build output
+        env:
+          SITE_DIST_DIR: apps/web/dist/deploy
+        run: node infra/site/scripts/cli.ts check-site
+      # Credential-free stand-in for a plan: Alchemy's plan reads the live account, so it needs a
+      # token. Instead, serve the prebuilt Worker with `alchemy dev` (local workerd, the uploaded
+      # modules, the same asset router, this PR's headers) and run the post-deploy smoke test.
+      - name: Serve locally and smoke test (no credentials)
+        env:
+          SITE_DIST_DIR: ${{ github.workspace }}/apps/web/dist/deploy
+        run: pnpm --filter @open-upload/site-infra run check:local
+      - name: Summary
+        env:
+          STAGE: ${{ steps.stage.outputs.stage }}
+        run: |
+          {
+            echo "### Site build (\`$STAGE\`)"
+            echo ""
+            echo "<details><summary>Response headers (_headers) for this stage</summary>"
+            echo ""
+            echo '```'
+            node infra/site/scripts/cli.ts headers
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # The artifact site-deploy consumes as untrusted data: manifest.json + site/.
+      - name: Assemble the artifact
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          STAGE: ${{ steps.stage.outputs.stage }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/artifact"
+          cp -R apps/web/dist/deploy "$RUNNER_TEMP/artifact/site"
+          OUT="$RUNNER_TEMP/artifact/manifest.json" node infra/site/scripts/cli.ts manifest
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site-${{ steps.stage.outputs.stage }}
+          path: ${{ runner.temp }}/artifact
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 90 }} # main builds kept for rollback
+          if-no-files-found: error
+          include-hidden-files: false
+
+  lifecycle:
+    name: site-lifecycle
+    # No-op: a closed or converted-to-draft PR still produces a completed `site` run, which is what
+    # triggers site-deploy to reconcile (tear the preview down).
+    if: github.event_name == 'pull_request' && (github.event.action == 'closed' || github.event.action == 'converted_to_draft')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    concurrency:
+      group: site-lifecycle-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - env:
+          ACTION: ${{ github.event.action }}
+        run: echo "PR $ACTION; site-deploy reconciles the preview."

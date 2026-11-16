@@ -88,3 +88,16 @@
 - Fixed: shared in-flight sign batches (9,989 → 1,001 sign requests for 9,987 parts); `maxUploadSize()` caps limits
   at `maxParts × maxPartSize` (48.8 TiB, not 50); SHA hash-ahead bounded to 128 MiB; e2e temp files cleaned.
 - Not proven: R2/AWS at this size, Firefox/WebKit at this size, disk-backed 10 GiB files, multi-hour uploads.
+
+### 2026-11-16 — owner request: common delivery standard with WebMCP SDK
+
+- Adopted the common standard (coordinator file `delivery-alignment-webmcp-better-upload.md`), vendoring WebMCP's
+  tested `infra/docs` as `infra/site` and its `tooling/release`. Details: `docs/SITE-DEPLOY.md`, `docs/RELEASING.md`.
+- Site: unprivileged `site.yml` builds the Worker without credentials (`apps/web` `build:worker`: Alchemy's Cloudflare
+  Vite plugin, in process); main-defined `site-deploy.yml` uploads it prebuilt (`Cloudflare.Worker`, `bundle: false`),
+  exact-SHA gate on every required check, stable PR comment, teardown on close/merge/draft, weekly sweep, HTTP state.
+- `apps/web/alchemy.run.ts` (Website.Vite) is local dev only (local state, local stages).
+- Release: staged npm publishing for the 6-package fixed group, human 2FA approval, `release-finalize`; first publish
+  replaced by the placeholder bootstrap. `scripts/publish.mjs` removed.
+- CI: stable job names (= required checks), `permissions: {}`, workflow-lint (zizmor pedantic + actionlint), real
+  R2/AWS tests moved to a main-only environment.
