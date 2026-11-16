@@ -156,7 +156,7 @@ Actions → `site-deploy` → *Run workflow*, with one of these inputs:
 
 ## 8. Tested vs not tested
 
-**Tested locally (2026-11-16, kit v0.1.2 (feb5219), no credentials):**
+**Tested locally (2026-11-16, kit v0.1.3 (07b1835), no credentials):**
 - `pnpm site:build` with a preview `SITE_URL`;
 - `check-artifact` (180 files, server about 977 KiB gzip);
 - `check:local`: the real artifact in workerd, with every smoke path 2xx including `/api/search`, `noindex`, and
