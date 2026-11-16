@@ -63,7 +63,9 @@ interface Session {
   readonly persist: boolean;
 }
 
-const SIGN_BATCH = 6;
+const SIGN_BATCH = 10;
+/** With SHA (opt-in), each hash buffers a whole part: hash ahead only while it fits in this budget. */
+const SHA_LOOKAHEAD_BYTES = 128 * 1024 * 1024;
 const URL_MARGIN_MS = 60_000;
 
 /** Adaptive concurrency: additive increase after a healthy streak, multiplicative decrease on congestion. */
@@ -138,6 +140,8 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
   /** Checksums being computed ahead of the network (worker pool), keyed by part number. */
   #hashing = new Map<number, Promise<string>>();
   #signed = new Map<number, SignedRequest>();
+  /** Sign round-trips in flight, keyed by every part they cover (so parallel parts share one batch). */
+  #signing = new Map<number, Promise<unknown>>();
   #concurrency: Concurrency;
   #run: AbortController | undefined;
   #listeners = new Set<() => void>();
@@ -220,6 +224,7 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
     this.#checksums.clear();
     this.#hashing.clear();
     this.#signed.clear();
+    this.#signing.clear();
     this.#error = undefined;
     this.#resumed = false;
     this.#source = {
@@ -392,6 +397,8 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
         this.#confirmed.clear();
         this.#checksums.clear();
         this.#hashing.clear();
+        this.#signed.clear();
+        this.#signing.clear();
         this.#source = { kind: 'new', init: source.fallback };
         this.#resumed = false;
         return this.#establishSession(signal);
@@ -494,9 +501,13 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
 
   /** Starts hashing the next parts while earlier ones are on the network, so hashing is off the critical path. */
   #hashAhead(queue: readonly number[], signal: AbortSignal) {
-    if (this.#session?.plan.checksum === 'none') return;
-    for (const partNumber of queue.slice(0, this.#concurrency.current + 2))
-      void this.#checksumOf(partNumber, signal).catch(() => {});
+    const plan = this.#session?.plan;
+    if (!plan || plan.checksum === 'none') return;
+    // CRC hashing streams (constant memory): look far enough ahead to fill a sign batch. SHA buffers whole parts.
+    const window = plan.checksum.startsWith('sha')
+      ? Math.floor(SHA_LOOKAHEAD_BYTES / Math.max(1, plan.partSize))
+      : Math.max(SIGN_BATCH, this.#concurrency.current + 2);
+    for (const partNumber of queue.slice(0, window)) void this.#checksumOf(partNumber, signal).catch(() => {});
   }
 
   async #readChecksum(blob: Blob, plan: PartPlan, signal: AbortSignal): Promise<string> {
@@ -640,24 +651,43 @@ export class UploadTaskImpl<TOutput = unknown> implements UploadTask<TOutput, an
   }
 
   async #signedRequest(partNumber: number, checksum: string, signal: AbortSignal): Promise<SignedRequest> {
-    const cached = this.#signed.get(partNumber);
-    if (cached && cached.expiresAt - URL_MARGIN_MS > Date.now()) return cached;
+    const fresh = () => {
+      const cached = this.#signed.get(partNumber);
+      return cached && cached.expiresAt - URL_MARGIN_MS > Date.now() ? cached : undefined;
+    };
+    const cached = fresh();
+    if (cached) return cached;
+    // Another part's sign batch already covers this one: wait for it instead of a round-trip of our own.
+    const pending = this.#signing.get(partNumber);
+    if (pending) {
+      await pending.catch(() => {});
+      signal.throwIfAborted();
+      const shared = fresh();
+      if (shared) return shared;
+    }
     const session = this.#session!;
     const plan = session.plan;
     // Sign this part plus the next few missing ones in one round-trip, when their checksums are known or cheap.
     const batch = [{ partNumber, ...(checksum ? { checksum } : {}) }];
     for (let n = partNumber + 1; n <= plan.partCount && batch.length < SIGN_BATCH; n++) {
-      if (this.#confirmed.has(n) || this.#signed.has(n)) continue;
+      if (this.#confirmed.has(n) || this.#signed.has(n) || this.#signing.has(n)) continue;
       const known = this.#checksums.get(n);
       if (plan.checksum !== 'none' && known === undefined) break;
       batch.push({ partNumber: n, ...(known ? { checksum: known } : {}) });
     }
-    const response = await this.#withRetry(
+    const call = this.#withRetry(
       () =>
         this.#deps.control.call<SignResponse>(this.endpoint, 'sign', { ticket: session.ticket, parts: batch }, signal),
       signal,
-    );
-    for (const part of response.parts) this.#signed.set(part.partNumber, part.request);
+    ).then((response) => {
+      for (const part of response.parts) this.#signed.set(part.partNumber, part.request);
+    });
+    for (const { partNumber: n } of batch) this.#signing.set(n, call);
+    try {
+      await call;
+    } finally {
+      for (const { partNumber: n } of batch) if (this.#signing.get(n) === call) this.#signing.delete(n);
+    }
     return this.#signed.get(partNumber)!;
   }
 

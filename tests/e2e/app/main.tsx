@@ -3,6 +3,7 @@ import { useDownload, usePendingUploads, useStore, useUpload, useUploadTask } fr
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { contract } from '../contract.ts';
+import { syntheticFile } from '../synthetic.ts';
 
 const params = new URLSearchParams(location.search);
 const client = createUploadClient<typeof contract>({
@@ -21,6 +22,14 @@ const client = createUploadClient<typeof contract>({
     : {}),
 });
 (window as any).__client = client;
+/** Heavy tests: upload a deterministic synthetic file of any size (built from Blob references, never in RAM). */
+(window as any).__startSynthetic = (size: number, seed: number, name: string) => {
+  const started = performance.now();
+  const file = syntheticFile({ size, seed }, name);
+  const buildMs = performance.now() - started;
+  client.videos.upload(file, { input: { albumId: 'heavy' } });
+  return { buildMs, size: file.size };
+};
 
 function TaskRow({ task }: { task: ReturnType<typeof client.videos.upload> }) {
   const s = useUploadTask(task)!;

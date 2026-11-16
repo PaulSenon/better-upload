@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx --conditions=source server.ts",
     "test:e2e": "playwright test",
+    "test:heavy": "node heavy/run.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

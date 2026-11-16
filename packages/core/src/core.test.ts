@@ -8,9 +8,11 @@ import {
   flattenRouter,
   isChecksumValue,
   matchesAccept,
+  maxUploadSize,
   parseBytes,
   parseDuration,
   partLength,
+  partRange,
   planParts,
   type StorageCapabilities,
   toBase64,
@@ -63,6 +65,10 @@ describe('units', () => {
   });
 });
 
+const MiB = 1024 ** 2;
+const GiB = 1024 ** 3;
+const TiB = 1024 ** 4;
+
 const caps: StorageCapabilities = {
   maxParts: 10_000,
   minPartSize: 5 * 1024 ** 2,
@@ -93,6 +99,80 @@ describe('part planning', () => {
   });
   it('rejects files above provider limits', () => {
     expect(() => planParts(6 * 1024 ** 4, caps, 'none')).toThrow(UploadError);
+  });
+  const invariants = (size: number, c: StorageCapabilities = caps) => {
+    const plan = planParts(size, c, 'crc32c');
+    if (plan.strategy === 'single') return plan;
+    expect(plan.partCount).toBeLessThanOrEqual(c.maxParts);
+    expect(plan.partSize).toBeGreaterThanOrEqual(c.minPartSize);
+    expect(plan.partSize).toBeLessThanOrEqual(c.maxPartSize);
+    expect(plan.partSize % MiB).toBe(0);
+    // Parts tile the file exactly: no gap, no overlap, last part non-empty and not larger than the others.
+    expect(partRange(plan, 1).start).toBe(0);
+    expect(partRange(plan, plan.partCount).end).toBe(size);
+    const last = partLength(plan, plan.partCount);
+    expect(last).toBeGreaterThan(0);
+    expect(last).toBeLessThanOrEqual(plan.partSize);
+    expect((plan.partCount - 1) * plan.partSize + last).toBe(size);
+    return plan;
+  };
+  it('plans 10 GiB (odd tail) as 1,281 parts of 8 MiB', () => {
+    const plan = invariants(10 * GiB + 12_345);
+    expect(plan).toMatchObject({ strategy: 'multipart', partSize: 8 * MiB, partCount: 1281 });
+    expect(partLength(plan, 1281)).toBe(12_345);
+  });
+  it('switches from 8 MiB parts to bigger ones exactly at 10,000 parts', () => {
+    expect(invariants(10_000 * 8 * MiB)).toMatchObject({ partSize: 8 * MiB, partCount: 10_000 });
+    expect(invariants(10_000 * 8 * MiB + 1)).toMatchObject({ partSize: 9 * MiB });
+  });
+  it('plans 1 TiB and the 5 TiB object limit within 10,000 parts', () => {
+    expect(invariants(TiB)).toMatchObject({ partSize: 105 * MiB, partCount: 9987 });
+    expect(invariants(5 * TiB)).toMatchObject({ partSize: 525 * MiB, partCount: 9987 });
+  });
+  it('holds its invariants for sizes across the whole range', () => {
+    let x = 42;
+    for (let i = 0; i < 2000; i++) {
+      x = (x * 1103515245 + 12345) >>> 0;
+      const size = Math.floor((x / 2 ** 32) ** 4 * 5 * TiB); // biased towards small sizes, up to 5 TiB
+      invariants(size);
+    }
+    for (const size of [8 * MiB, 8 * MiB + 1, 5 * MiB, 5 * TiB - 1, 5 * TiB]) invariants(size);
+  });
+  it('caps the limit at maxParts × maxPartSize when the object limit is higher (AWS/MinIO: 50 TiB)', () => {
+    const big = { ...caps, maxObjectSize: 50 * TiB };
+    expect(maxUploadSize(big)).toBe(10_000 * 5 * GiB);
+    expect(invariants(10_000 * 5 * GiB, big)).toMatchObject({ partSize: 5 * GiB, partCount: 10_000 });
+    const over = () => planParts(10_000 * 5 * GiB + 1, big, 'crc32c');
+    expect(over).toThrow(UploadError);
+    expect(over).toThrow(/48\.8/);
+    expect(maxUploadSize({ ...caps, maxObjectSize: 4.995 * TiB })).toBe(Math.floor(4.995 * TiB));
+  });
+});
+
+describe('memory stays bounded while hashing', () => {
+  /** A Blob that records every read, without holding the bytes (they are generated per slice). */
+  function trackedBlob(size: number, reads: number[]): Blob {
+    const make = (start: number, end: number): Blob =>
+      ({
+        size: end - start,
+        slice: (a = 0, b = end - start) => make(start + a, start + Math.min(b, end - start)),
+        arrayBuffer: async () => {
+          reads.push(end - start);
+          return new Uint8Array(end - start).fill(start % 251).buffer;
+        },
+      }) as unknown as Blob;
+    return make(0, size);
+  }
+  it('CRC32C reads a part in 1 MiB slices whatever its size', async () => {
+    const reads: number[] = [];
+    await checksumBlob('crc32c', trackedBlob(64 * MiB + 3, reads));
+    expect(Math.max(...reads)).toBeLessThanOrEqual(MiB);
+    expect(reads.reduce((a, b) => a + b, 0)).toBe(64 * MiB + 3);
+  });
+  it('SHA-256 (opt-in) reads the whole part at once: memory = one part', async () => {
+    const reads: number[] = [];
+    await checksumBlob('sha256', trackedBlob(16 * MiB, reads));
+    expect(reads).toEqual([16 * MiB]);
   });
 });
 

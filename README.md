@@ -63,6 +63,7 @@ pnpm test                 # unit tests (all packages)
 pnpm minio:up             # local S3 (Docker)
 pnpm test:integration     # adapter + full stack against MinIO (and R2 / AWS when configured)
 pnpm test:e2e             # Playwright: Chromium, WebKit, Firefox, iPhone, with fault injection
+pnpm --filter @open-upload/e2e test:heavy   # opt-in, local only: one 10 GiB browser upload (docs/TESTING-HEAVY.md)
 pnpm --filter @open-upload/web dev   # docs + registry on http://localhost:3000
 ```
 

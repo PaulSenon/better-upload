@@ -80,3 +80,11 @@
 - oRPC: Claude must not post anything; the owner will, if needed → D-034.
 - Convex component before Payload → D-032 AGREED, I2 resolved. The "tables on by default?" question was unclear; resolved by following ConvexFS (it has tables), I4 closed.
 - Name: generic shortlist rejected; pattern "<prefix> upload" with a personal T3-style prefix → D-001.
+
+### 2026-11-16 — owner request: large files (>= 10 GB)
+
+- Real browser upload of 10 GiB + 12,345 B into MinIO with resets, offline and reload: byte-identical, 0.32 % overhead,
+  page heap 8 MiB. Protocol, numbers and limits: `docs/TESTING-HEAVY.md`. Opt-in only (`test:heavy`), never in CI.
+- Fixed: shared in-flight sign batches (9,989 → 1,001 sign requests for 9,987 parts); `maxUploadSize()` caps limits
+  at `maxParts × maxPartSize` (48.8 TiB, not 50); SHA hash-ahead bounded to 128 MiB; e2e temp files cleaned.
+- Not proven: R2/AWS at this size, Firefox/WebKit at this size, disk-backed 10 GiB files, multi-hour uploads.

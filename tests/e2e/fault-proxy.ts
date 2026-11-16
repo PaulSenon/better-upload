@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { Transform } from 'node:stream';
 
 /**
  * HTTP proxy between the browser and MinIO that injects faults on part uploads (PUT with partNumber, or single PUTs).
@@ -28,10 +29,42 @@ export interface ProxyLog {
   faulted: string | null;
 }
 
-export function startFaultProxy(options: { port: number; target: { host: string; port: number } }) {
+export interface ProxyStats {
+  /** Request body bytes received from the browser on PUTs (including parts that were later cut or retried). */
+  putBytesIn: number;
+  putOk: number;
+  putFailed: number;
+  /** Response bytes sent back on GETs. */
+  getBytesOut: number;
+}
+
+export function startFaultProxy(options: {
+  port: number;
+  target: { host: string; port: number };
+  /** Global cap on PUT body throughput (bytes/s), shared by all connections. Default: none. */
+  maxBytesPerSecond?: number;
+  /** Keep a per-request log (disable for very long runs). Default true. */
+  log?: boolean;
+}) {
   let config: FaultConfig = { rate: 0, mode: 'none' };
   let faultedCount = 0;
   const log: ProxyLog[] = [];
+  const stats: ProxyStats = { putBytesIn: 0, putOk: 0, putFailed: 0, getBytesOut: 0 };
+  const keepLog = options.log ?? true;
+  // Token bucket shared by every connection: `next` is when the budget allows the next byte.
+  let next = 0;
+  const throttle = () =>
+    new Transform({
+      transform(chunk: Buffer, _enc, done) {
+        const bps = options.maxBytesPerSecond;
+        if (!bps) return done(null, chunk);
+        const now = Date.now();
+        next = Math.max(next, now) + (chunk.length / bps) * 1000;
+        const wait = next - now - 50; // 50 ms burst
+        if (wait > 0) setTimeout(() => done(null, chunk), wait);
+        else done(null, chunk);
+      },
+    });
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://proxy');
@@ -46,7 +79,8 @@ export function startFaultProxy(options: { port: number; target: { host: string;
       status: 0,
       faulted: null,
     };
-    if (req.method === 'PUT' || req.method === 'GET') log.push(entry);
+    if (keepLog && (req.method === 'PUT' || req.method === 'GET')) log.push(entry);
+    if (req.method === 'PUT') req.on('data', (c: Buffer) => (stats.putBytesIn += c.length));
     const eligible =
       isUpload &&
       config.mode !== 'none' &&
@@ -90,6 +124,7 @@ export function startFaultProxy(options: { port: number; target: { host: string;
     if (eligible && config.mode === 'reset') {
       faultedCount++;
       entry.faulted = 'reset';
+      stats.putFailed++;
       let received = 0;
       req.on('data', (chunk: Buffer) => {
         received += chunk.length;
@@ -110,6 +145,7 @@ export function startFaultProxy(options: { port: number; target: { host: string;
       return;
     }
     const forward = () => {
+      let counted = false;
       const upstream = http.request(
         {
           host: options.target.host,
@@ -120,12 +156,27 @@ export function startFaultProxy(options: { port: number; target: { host: string;
         },
         (up) => {
           entry.status = up.statusCode ?? 0;
+          if (req.method === 'PUT' && !counted) {
+            counted = true;
+            if (entry.status >= 200 && entry.status < 300) stats.putOk++;
+            else stats.putFailed++;
+          }
+          if (req.method === 'GET') up.on('data', (c: Buffer) => (stats.getBytesOut += c.length));
           res.writeHead(up.statusCode ?? 502, up.headers);
           up.pipe(res);
         },
       );
       upstream.on('error', () => res.destroy());
-      req.pipe(upstream);
+      res.on('close', () => {
+        if (res.writableFinished) return;
+        if (req.method === 'PUT' && !counted) {
+          counted = true;
+          stats.putFailed++;
+        }
+        upstream.destroy();
+      });
+      if (req.method === 'PUT' && options.maxBytesPerSecond) req.pipe(throttle()).pipe(upstream);
+      else req.pipe(upstream);
     };
     if (eligible && config.mode === 'delay') {
       faultedCount++;
@@ -146,10 +197,12 @@ export function startFaultProxy(options: { port: number; target: { host: string;
       faultedCount = 0;
     },
     log,
+    stats,
     reset() {
       config = { rate: 0, mode: 'none' };
       faultedCount = 0;
       log.length = 0;
+      Object.assign(stats, { putBytesIn: 0, putOk: 0, putFailed: 0, getBytesOut: 0 });
     },
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
