@@ -14,7 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pkg = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-// local: default to the configured artifact (the kit hardcodes its fixture's apps/site/out).
+// local: default to the configured artifact (the kit hardcodes its fixture's apps/site/out; queued for v0.1.5).
 let artifact = resolve(
   process.env.SITE_ARTIFACT_DIR ??
     join(pkg, "../..", JSON.parse(readFileSync(join(pkg, "../../delivery.config.json"), "utf8")).site.artifact),
@@ -38,6 +38,9 @@ if (process.argv.includes("--server")) {
   artifact = join(scratch, "art");
 }
 const stage = "ci_local_check";
+const stack = `${(JSON.parse(readFileSync(process.env.DELIVERY_CONFIG ?? join(pkg, "../../delivery.config.json"), "utf8")) as { project: string }).project}-site`;
+/** What `alchemy dev` writes for this stage (state + local runtime cache), nothing else. */
+const ownStageDirs = () => [join(pkg, ".alchemy/state", stack, stage), join(pkg, ".alchemy/local/cache", `${stack}-${stage.replaceAll("_", "-")}`)];
 const revision = `main@${"0".repeat(7)}`;
 const home = mkdtempSync(join(tmpdir(), "alchemy-home-"));
 
@@ -66,7 +69,8 @@ const stop = () => {
   } catch {}
   rmSync(home, { recursive: true, force: true });
   rmSync(scratch, { recursive: true, force: true });
-  rmSync(join(pkg, ".alchemy"), { recursive: true, force: true });
+  // Only this check's own stage: a developer's other local stages in .alchemy/ are left alone.
+  for (const dir of ownStageDirs()) rmSync(dir, { recursive: true, force: true });
 };
 
 let log = "";

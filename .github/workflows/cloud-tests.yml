@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: cloud-tests # branch policy: main only
+    cache-mode: none # holds secrets (kit W10)
     permissions:
       contents: read
     steps:

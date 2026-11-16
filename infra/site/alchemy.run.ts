@@ -90,7 +90,7 @@ export default Alchemy.Stack(
         directory: join(artifactDir, "assets"),
         htmlHandling: config.site.htmlHandling ?? "auto-trailing-slash",
         notFoundHandling: config.site.server ? "none" : "404-page",
-        headers: renderHeaders(stage, revision),
+        headers: renderHeaders(stage, revision, config.site.headers),
         redirects: "",
       },
       // Stable workers.dev URL only: per-version preview URLs would keep every old build public.

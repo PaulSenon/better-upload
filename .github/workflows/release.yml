@@ -156,6 +156,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: release-finalize # required reviewer: approve AFTER approving the staged versions on npm
+    cache-mode: none # kit W10
     permissions:
       contents: write # create the tags and the GitHub releases
     steps:

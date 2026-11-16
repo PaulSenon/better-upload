@@ -209,13 +209,15 @@ const commands: Record<string, () => Promise<void>> = {
         if (new URL(res.url).origin !== new URL(url).origin) throw new Error(`${path} redirects off-site to ${res.url}`);
         const got = res.headers.get("x-delivery-revision");
         await res.arrayBuffer();
-        // The revision header comes from the asset layer's _headers (static responses).
+        // The revision header and project headers come from the asset layer's _headers (static
+        // responses). A missing one means _headers was rejected (e.g. a repeated pattern).
         const revisionOk = !revision || config.site.server || got === revision;
-        if (res.status >= 200 && res.status < 300 && revisionOk) {
+        const projectOk = config.site.server || Object.entries(config.site.headers?.["/*"] ?? {}).every(([n, v]) => res.headers.get(n) === v);
+        if (res.status >= 200 && res.status < 300 && revisionOk && projectOk) {
           last = "";
           break;
         }
-        last = `${path}: HTTP ${res.status}, revision ${got ?? "none"}`;
+        last = `${path}: HTTP ${res.status}, revision ${got ?? "none"}${projectOk ? "" : ", configured site.headers missing"}`;
         await sleep(attempt * 3_000);
       }
       if (last) throw new Error(`smoke test failed: ${last}`);
