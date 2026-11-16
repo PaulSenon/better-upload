@@ -189,8 +189,8 @@ Les commandes d'installation du registry affichées dans la doc utilisent automa
 
 ## Étape 8 — Tests sur les vrais fournisseurs (optionnel, 15 min)
 
-La CI teste les PR contre MinIO. Les tests sur R2 et AWS tournent dans le workflow `cloud-tests`, chaque mardi ou à la main, jamais
-depuis une PR. Leurs clés sont dans l'environnement `cloud-tests`, limité à `main`, donc aucune PR ne peut les lire.
+La CI teste les PR contre MinIO. Les tests sur R2 et AWS tournent dans le workflow `cloud-tests` à chaque push sur `main`, chaque mardi et à la main,
+jamais depuis une PR. Leurs clés sont dans l'environnement `cloud-tests`, limité à `main`, donc aucune PR ne peut les lire.
 
 1. Crée un bucket **dédié aux tests** chez chaque fournisseur :
    - **R2** : bucket `open-upload-ci`, token *Object Read & Write* limité à ce bucket.

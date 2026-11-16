@@ -83,7 +83,7 @@ pull_request (opened, synchronize, reopened, ready_for_review, converted_to_draf
 
 **By hand:**
 - Dependency graph + Dependabot alerts (Settings → Code security): required by `dependency-review`. Already
-  enabled on this repository (2026-11-16).
+  enabled on this repository (2026-11-16); `setup-github.mjs` also enables it (kit v0.1.5).
 - `SITE_DEPLOY_ENABLED=true`: the owner's decision to turn deploys on.
 - `NPM_RELEASE_ENABLED=true`: see RELEASING.md.
 - The `cloud-tests` environment (main only; R2/AWS keys scoped to a test bucket) and `CLOUD_TESTS_ENABLED=true`.
@@ -141,7 +141,7 @@ Actions → `site-deploy` → *Run workflow*, with one of these inputs:
 - `pnpm --filter ./infra/site run check:local`: the real artifact served by workerd, then the smoke paths;
 - `pnpm check:workflows`.
 
-## 7. Divergences from the kit (kit v0.1.4; marked `local:` in the files)
+## 7. Divergences from the kit (kit v0.1.5)
 
 **Project configuration (the kit's documented extension points, not patches):**
 - `delivery.config.json`:
@@ -153,33 +153,36 @@ Actions → `site-deploy` → *Run workflow*, with one of these inputs:
     Permissions-Policy, COOP, and immutable `/assets/*`.
 - `ci.yml` is project-owned: `check`, `integration`, `convex`, the 4 `e2e`, `workflow-lint`, plus the kit's
   `dependency-review`.
+- `cloud-tests.yml` is a project workflow for the R2/AWS tests:
+  - it runs on push to main, weekly and on dispatch;
+  - the job is gated off PR events, in the `cloud-tests` environment (main only), with `cache-mode: none`.
+- `infra/site/test/local.test.ts` checks that the project's headers reach every stage.
 
 **Divergences:**
 
 | Where | What | Why | Status |
 |---|---|---|---|
 | `release.yml`, `tooling/release/` | WebMCP-model release, kept (`vendor.mjs` keeps an existing release); `cache-mode: none` added on `finalize` (kit W10) | the kit's release converges on WebMCP's | until kit v0.2.0 |
-| `cloud-tests.yml` | R2/AWS tests, schedule + dispatch only, `cloud-tests` environment (main only), `cache-mode: none` | W4 forbids secrets in PR- *and push*-triggered workflows, even push-to-main with a main-only environment | queued for kit v0.1.5 (W4 push-main) |
 | `apps/web/scripts/build-worker.ts` | kept instead of the kit's `template/recipes/build-worker.ts` (derived from it). Same build and `browser`-condition fix; differs by passing `SITE_URL` to the site as `VITE_SITE_URL` (trailing slash removed) and a fixed `dist/deploy` instead of `SITE_OUT_DIR`; plugin name and quote style | the prerendered `npx shadcn add <origin>/r/…` commands must show each preview's own origin | permanent (project build) |
-| `infra/site/scripts/local-check.ts` | default artifact from `delivery.config.json` | the kit hardcodes its fixture's `apps/site/out` | queued for kit v0.1.5 |
-| `infra/site/package.json` | name `@open-upload/site-infra`; `check:local` runs the real SSR artifact only | the kit's `--ssr-fixture` reuses the project's `serverEntry` and smoke paths | queued for kit v0.1.5 |
-| `infra/site/test/local.test.ts` | the project's headers reach every stage | project test | permanent |
 
-The kit v0.1.4 fixes the earlier local patches, which are now removed:
-- production reading `steps.before` (L5);
-- `local-check` scope (L4);
-- `deploy-comment` concurrency (L6);
-- the headers hook;
-- the kit tests asserting its fixture (portable tests).
+No vendored kit file carries a `local:` patch any more. v0.1.4 and v0.1.5 fixed every earlier one:
+- production `steps.fresh`;
+- `local-check` scope and default artifact;
+- `--ssr-fixture` values;
+- comment concurrency;
+- headers hook;
+- portable tests;
+- W4 for main-only environment jobs;
+- the dependency graph in `setup-github`.
 
 ## 8. Tested vs not tested
 
-**Tested locally (2026-11-16, kit v0.1.4 (7961a73), no credentials):**
+**Tested locally (2026-11-16, kit v0.1.5 (a0e4a2b), no credentials):**
 - `pnpm site:build` with a preview `SITE_URL`;
 - `check-artifact` (180 files, server about 977 KiB gzip);
 - `check:local`: the real artifact in workerd, with every smoke path 2xx including `/api/search`, `noindex`, and
-  404 on an unknown path;
-- 31 infra tests (kit + local) and 19 tooling tests (release + workflow invariants with mutations);
+  404 on an unknown path; then the kit's SSR fixture (`/api/hello`);
+- 31 infra tests (kit + local) and 20 tooling tests (release + workflow invariants with mutations);
 - actionlint 1.7.12, zizmor 1.32.0 pedantic, and `check-workflows` W1–W10: all clean.
 
 **Not tested** (needs the account):

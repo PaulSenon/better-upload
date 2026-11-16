@@ -21,8 +21,9 @@ On every PR and push to `main`, with no secret (`permissions: {}` by default, re
 
 These names are the required checks of the branch ruleset and of the site deploy gate (`infra/site/src/gate.ts`).
 
-`cloud-tests.yml` (real R2 / AWS) runs on main only, on Tuesdays and on dispatch, when `CLOUD_TESTS_ENABLED=true`.
-It is never triggered by a PR or a push. Its keys live in the `cloud-tests` environment, restricted to `main`. Use a dedicated test bucket with the CORS and lifecycle rule from `recommendedBucketConfig()`.
+`cloud-tests.yml` (real R2 / AWS) runs on main only, on every push, on Tuesdays and on dispatch, when
+`CLOUD_TESTS_ENABLED=true`. It is never triggered by a PR. Its keys live in the `cloud-tests` environment, restricted
+to `main`. Use a dedicated test bucket with the CORS and lifecycle rule from `recommendedBucketConfig()`.
 
 ## npm releases (`release.yml`, `version-pr.yml`): off until `NPM_RELEASE_ENABLED=true`
 

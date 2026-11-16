@@ -1,5 +1,5 @@
 {
-  "name": "@open-upload/site-infra",
+  "name": "@example/site-infra",
   "version": "0.0.0",
   "private": true,
   "description": "Site infrastructure (Alchemy v2) from the Monorepo Delivery Kit. Not published.",
@@ -8,7 +8,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test 'test/*.test.ts'",
     "check": "pnpm typecheck && pnpm test",
-    "check:local": "node scripts/local-check.ts"
+    "check:local": "node scripts/local-check.ts && node scripts/local-check.ts --ssr-fixture"
   },
   "devDependencies": {
     "@alchemy.run/cloudflare": "2.0.0-beta.85",
