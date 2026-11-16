@@ -99,10 +99,13 @@ test('after a reload, uploading the same file again from the normal picker conti
 
 test('a re-selected file with another name but the same bytes is verified in full and accepted', async ({ page }) => {
   await page.goto('/?concurrency=1');
-  await faults(page, { rate: 1, mode: 'delay', delayMs: 400 });
+  // Slow enough that the upload is still running at the reload (4 parts; URLs are signed in batches, so only the
+  // part delay paces it).
+  await faults(page, { rate: 1, mode: 'delay', delayMs: 3000 });
   const original = { name: 'IMG_0001.MOV', mimeType: 'video/quicktime', buffer: bytes(32 * MiB, 302) };
   await page.getByTestId('file').setInputFiles(original);
   await waitForParts(page, 2);
+  await expect(task(page)).toHaveAttribute('data-status', 'uploading');
   await page.reload();
   await resetFaults(page);
   await page.getByTestId('reselect').setInputFiles({ ...original, name: 'renamed-copy.mov' });
