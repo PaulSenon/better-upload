@@ -1,90 +1,66 @@
-// One-time, idempotent setup of the site deploy in ONE Cloudflare account. Run by an agent (or the
-// maintainer) on a workstation, never in CI, with a TEMPORARY broad account token that Isaac
-// deletes afterwards. The token is read from a file and is never printed, passed in argv, or
-// written anywhere but child-process environments. State-store bearer tokens are written only to
-// 0600 files in --out-dir, for `gh secret set … < file`.
+// One-time, idempotent Cloudflare setup, run on a workstation (never in CI) with a TEMPORARY broad
+// account token that the owner deletes afterwards. Adapted from webmcp-sdk
+// infra/docs/scripts/bootstrap.ts. The token is read from a file, never printed or put in argv.
 //
-//   node infra/site/scripts/bootstrap.ts --account-id <32 hex> --token-file <path> \
-//     --out-dir <private dir> [--subdomain <name>] [--check]
+//   node infra/site/scripts/bootstrap.ts --account-id <32 hex> --token-file <path> --out-dir <private dir> [--subdomain <name>] [--check]
 //
-// Steps
-//   1. verify the token: an active ACCOUNT-owned token of this account
-//   2. the account's workers.dev subdomain (read; created only if the account has none)
-//   3. the two Alchemy state stores, better-upload-site-state (production) and
-//      better-upload-site-preview-state (staging/previews): `alchemy state bootstrap` if absent,
-//      then their bearer tokens -> <out-dir>/<store>.token
-//   4. the Workers better-upload-site and better-upload-site-staging, created with a placeholder page
-//      ONLY if absent (an existing Worker is never overwritten), so per-Worker token scopes can
-//      name them
-//   5. print the permissions Isaac sets on the two CI tokens, and the gh commands
-// `--check` only reads.
+//   1. the account's workers.dev subdomain (read; created only if absent and --subdomain given)
+//   2. the two Alchemy state stores (<worker>-state, <worker>-preview-state): `alchemy state
+//      bootstrap` if absent, then their bearer tokens -> <out-dir>/<store>.token (0600)
+//   3. the production Worker, created with a placeholder page ONLY if absent, so that the
+//      production CI token can be scoped to that one Worker
+//   4. prints the two CI tokens the owner creates, and the next command (tooling/setup-github.mjs)
+// --check only reads.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { accountName, ensureWorkersSubdomain, getWorkersSubdomain, verifyToken, workerAccess } from "../src/account.ts";
-import { ACCOUNT_ID, cloudflare, redact, type CloudflareClient } from "../src/api.ts";
-import { probeStateStore } from "../src/isolation.ts";
-import { STATE_STORES, assertSubdomain, stateStoreUrl, workerName, type StateStoreName } from "../src/stage.ts";
+import { ACCOUNT_ID, cfErrors, cloudflare, redact, type CloudflareClient } from "../src/api.ts";
+import { loadConfig } from "../src/config.ts";
+import { assertSubdomain, stateStores, stateStoreUrl, workerName } from "../src/stage.ts";
 
 const pkg = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const config = loadConfig();
+const base = config.site.worker;
 
-export interface BootstrapArgs {
-  accountId: string;
-  tokenFile: string;
-  outDir: string;
-  subdomain?: string;
-  check: boolean;
+function arg(argv: readonly string[], flag: string) {
+  const i = argv.indexOf(flag);
+  return i >= 0 ? argv[i + 1] : undefined;
 }
 
-const FLAGS = ["--account-id", "--token-file", "--out-dir", "--subdomain", "--check"];
+async function workerAccess(cf: CloudflareClient, accountId: string, name: string) {
+  const { status, body } = await cf.request("GET", `/accounts/${accountId}/workers/scripts/${name}/settings`);
+  if (body?.success) return "present";
+  if (status === 404 || /10007|not found/i.test(cfErrors(body))) return "absent";
+  throw new Error(`cannot read Worker ${name}: HTTP ${status} ${cfErrors(body)} (the bootstrap token needs Workers Admin on all Workers)`);
+}
 
-export function parseArgs(argv: readonly string[]): BootstrapArgs {
-  const get = (flag: string) => {
-    const i = argv.indexOf(flag);
-    return i >= 0 ? argv[i + 1] : undefined;
-  };
-  for (const arg of argv) {
-    if (arg.startsWith("--") && !FLAGS.includes(arg)) {
-      throw new Error(`unknown option ${arg} (the token is only accepted through --token-file)`);
-    }
+async function subdomainOf(cf: CloudflareClient, accountId: string, wanted: string | undefined, check: boolean) {
+  const { body } = await cf.request<{ subdomain?: string }>("GET", `/accounts/${accountId}/workers/subdomain`);
+  const existing = body?.success ? body.result?.subdomain : undefined;
+  if (existing) {
+    if (wanted && wanted !== existing) throw new Error(`the account already uses workers.dev subdomain "${existing}"; never changed (it would break every URL)`);
+    return existing;
   }
-  const accountId = get("--account-id") ?? "";
-  if (!ACCOUNT_ID.test(accountId)) throw new Error("--account-id must be the 32-hex Cloudflare account ID");
-  const tokenFile = get("--token-file");
-  if (!tokenFile) throw new Error("--token-file <path> is required");
-  const outDir = get("--out-dir");
-  if (!outDir) throw new Error("--out-dir <private directory> is required (state-store tokens are written there)");
-  const subdomain = get("--subdomain");
-  if (subdomain !== undefined) assertSubdomain(subdomain);
-  return { accountId, tokenFile, outDir, ...(subdomain ? { subdomain } : {}), check: argv.includes("--check") };
+  if (!wanted) throw new Error("the account has no workers.dev subdomain: pass --subdomain <name>");
+  if (check) return assertSubdomain(wanted);
+  const res = await cf.request<{ subdomain: string }>("PUT", `/accounts/${accountId}/workers/subdomain`, { subdomain: assertSubdomain(wanted) });
+  if (!res.body?.success) throw new Error(`cannot create the subdomain: ${cfErrors(res.body)}`);
+  return res.body.result.subdomain;
 }
 
-export function readToken(path: string): string {
-  const st = statSync(path);
-  if (!st.isFile()) throw new Error("--token-file is not a regular file");
-  if (process.platform !== "win32" && (st.mode & 0o077) !== 0) {
-    console.log("warning: the token file is readable by other users; chmod 600 it");
-  }
-  const token = readFileSync(path, "utf8").trim();
-  if (!token || /\s/.test(token) || token.length < 20) throw new Error("the token file must contain exactly one token");
-  return token;
-}
-
-/** Find the bearer token Alchemy cached for a store under a throwaway ALCHEMY_HOME. */
-export function findCachedStoreToken(home: string, store: string): string | undefined {
+/** Alchemy caches a store's bearer token under ALCHEMY_HOME when it logs in to the store. */
+function findCachedStoreToken(home: string, store: string): string | undefined {
   const walk = (dir: string): string | undefined => {
     for (const name of readdirSync(dir)) {
       const path = join(dir, name);
-      const st = statSync(path);
-      if (st.isDirectory()) {
+      if (statSync(path).isDirectory()) {
         const found = walk(path);
         if (found) return found;
       } else if (name.endsWith(".json")) {
         try {
-          const json = JSON.parse(readFileSync(path, "utf8")) as { stores?: Record<string, { authToken?: string }> };
-          const token = json.stores?.[store]?.authToken;
+          const token = (JSON.parse(readFileSync(path, "utf8")) as { stores?: Record<string, { authToken?: string }> }).stores?.[store]?.authToken;
           if (token) return token;
         } catch {
           // not ours
@@ -96,174 +72,100 @@ export function findCachedStoreToken(home: string, store: string): string | unde
   return existsSync(home) ? walk(home) : undefined;
 }
 
-interface Ctx {
-  token: string;
-  accountId: string;
-  subdomain: string;
-  home: string;
-}
-
-function alchemy(ctx: Ctx, args: string[], extra: Record<string, string>) {
-  // cwd is throwaway so Alchemy's project logs (.alchemy/) never persist; ALCHEMY_HOME is the
-  // throwaway home where it caches the state-store credentials we read back.
-  const cwd = mkdtempSync(join(tmpdir(), "site-bootstrap-cwd-"));
-  try {
-    const res = spawnSync(join(pkg, "node_modules/.bin/alchemy"), [...args, "--config", join(pkg, "alchemy.run.ts")], {
-      cwd,
-      encoding: "utf8",
-      env: {
-        PATH: process.env.PATH,
-        HOME: ctx.home,
-        ALCHEMY_HOME: join(ctx.home, ".alchemy"),
-        ALCHEMY_PLAIN: "1",
-        DO_NOT_TRACK: "1",
-        ALCHEMY_TELEMETRY_DISABLED: "1",
-        SITE_ALLOW_LOCAL_REMOTE: "1",
-        CLOUDFLARE_API_TOKEN: ctx.token,
-        CLOUDFLARE_ACCOUNT_ID: ctx.accountId,
-        CLOUDFLARE_WORKERS_SUBDOMAIN: ctx.subdomain,
-        ...extra,
-      },
-    });
-    const secrets = [ctx.token, extra.SITE_STATE_TOKEN];
-    const out = redact(`${res.stdout ?? ""}${res.stderr ?? ""}`, secrets);
-    console.log(out.trim().split("\n").map((l) => `  | ${l}`).join("\n"));
-    if (res.status !== 0) throw new Error(`alchemy ${args.join(" ")} failed (exit ${res.status})`);
-  } finally {
-    rmSync(cwd, { recursive: true, force: true });
-  }
-}
-
-function placeholderSite(): string {
-  const dir = mkdtempSync(join(tmpdir(), "site-placeholder-"));
-  mkdirSync(join(dir, "assets"));
-  const page = (title: string) =>
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>${title}</title></head><body><p>${title}</p></body></html>\n`;
-  // Assets only (no server/): the first CI deploy uploads the real Worker.
-  writeFileSync(join(dir, "assets", "index.html"), page("Open Upload: first deploy pending"));
-  return dir;
-}
-
-async function ensureStore(cf: CloudflareClient, ctx: Ctx, store: StateStoreName, outDir: string, check: boolean) {
-  let access = await workerAccess(cf, ctx.accountId, store);
-  if (access === "forbidden") throw new Error(`the token cannot see ${store}: it needs Workers Admin (all Workers)`);
-  if (access === "absent") {
-    if (check) {
-      console.log(`state store ${store}: absent`);
-      return undefined;
-    }
-    console.log(`state store ${store}: absent, bootstrapping…`);
-    alchemy(ctx, ["state", "bootstrap"], { SITE_STATE: "cloudflare", SITE_STATE_STORE: store });
-    access = await workerAccess(cf, ctx.accountId, store);
-    if (access !== "present") throw new Error(`state store ${store} still absent after bootstrap`);
-  }
-  // Read the store's bearer token back: Alchemy caches it outside CI under ALCHEMY_HOME when it
-  // logs in to the store (through the account's Secrets Store, which this token may use).
-  alchemy(ctx, ["state", "list"], { SITE_STATE: "cloudflare", SITE_STATE_STORE: store });
-  const bearer = findCachedStoreToken(ctx.home, store);
-  if (!bearer) throw new Error(`could not read the bearer token of ${store}`);
-  const probe = await probeStateStore(stateStoreUrl(store, ctx.subdomain), bearer);
-  if (!probe.authorized) throw new Error(`the bearer token read for ${store} is refused by the store`);
-  console.log(`state store ${store}: present, state API v${probe.version}`);
-  if (check) return undefined;
-  const file = join(outDir, `${store}.token`);
-  writeFileSync(file, bearer, { mode: 0o600 });
-  chmodSync(file, 0o600);
-  return { store, file, bearer };
-}
-
-async function ensureWorker(cf: CloudflareClient, ctx: Ctx, stage: "production" | "staging", bearer: string | undefined, check: boolean) {
-  const name = workerName(stage);
-  const access = await workerAccess(cf, ctx.accountId, name);
-  if (access === "present") {
-    console.log(`Worker ${name}: present (left as it is)`);
-    return;
-  }
-  if (access === "forbidden") throw new Error(`the token cannot see ${name}: it needs Workers Admin (all Workers)`);
-  if (check || !bearer) {
-    console.log(`Worker ${name}: absent`);
-    return;
-  }
-  console.log(`Worker ${name}: absent, creating it with a placeholder page…`);
-  const site = placeholderSite();
-  try {
-    alchemy(ctx, ["deploy", "--stage", stage, "--yes", "--no-input"], {
-      SITE_STATE: "http",
-      SITE_STATE_STORE: STATE_STORES[stage === "production" ? "production" : "preview"],
-      SITE_STATE_TOKEN: bearer,
-      SITE_DIST_DIR: site,
-    });
-  } finally {
-    rmSync(site, { recursive: true, force: true });
-  }
-  if ((await workerAccess(cf, ctx.accountId, name)) !== "present") throw new Error(`Worker ${name} still absent`);
-}
-
-export function permissionReport(subdomain: string): string {
-  const prod = workerName("production");
-  const staging = workerName("staging");
-  return [
-    "",
-    "Isaac — create the ACCOUNT tokens (Manage Account → API Tokens → Create Token → Custom token):",
-    "",
-    `  github-site-production   Workers · Specified Workers: ${prod} · Editor`,
-    `  github-site-preview-dynamic  Workers · All Workers · Admin   (SITE_PREVIEW_MODE=dynamic, the contract default;`,
-    "                               account-wide: can touch every Worker of the account, docs/SITE-DEPLOY.md §3)",
-    `  github-site-staging      Workers · Specified Workers: ${staging} · Editor   (only with SITE_PREVIEW_MODE=staging)`,
-    "",
-    "  Nothing else: no Secrets Store, no zone, no account-wide Workers role, no access to the",
-    `  state-store Workers (CI reaches state over HTTPS with the bearer tokens written to --out-dir).`,
-    `  Expiration 1 year. Then delete the temporary bootstrap token.`,
-    "",
-    "Agent — GitHub (tokens through stdin only):",
-    `  gh secret set CLOUDFLARE_API_TOKEN  --env site-production < <github-site-production token file>`,
-    `  gh secret set SITE_STATE_TOKEN      --env site-production < <out-dir>/${STATE_STORES.production}.token`,
-    `  gh secret set CLOUDFLARE_API_TOKEN  --env site-preview    < <github-site-preview-dynamic (or github-site-staging) token file>`,
-    `  gh secret set SITE_STATE_TOKEN      --env site-preview    < <out-dir>/${STATE_STORES.preview}.token`,
-    "  printf %s <account id> | gh secret set CLOUDFLARE_ACCOUNT_ID --env site-production",
-    "  printf %s <account id> | gh secret set CLOUDFLARE_ACCOUNT_ID --env site-preview",
-    `  gh variable set SITE_WORKERS_SUBDOMAIN --body ${subdomain}`,
-    "  gh variable set SITE_PREVIEW_MODE --body dynamic   # or staging",
-    "Then delete every token file.",
-  ].join("\n");
-}
-
 export async function main(argv: readonly string[]) {
-  const args = parseArgs(argv);
-  const token = readToken(args.tokenFile);
+  const accountId = arg(argv, "--account-id") ?? "";
+  if (!ACCOUNT_ID.test(accountId)) throw new Error("--account-id must be the 32-hex Cloudflare account ID");
+  const tokenFile = arg(argv, "--token-file") ?? "";
+  const outDir = arg(argv, "--out-dir") ?? "";
+  if (!tokenFile || !outDir) throw new Error("--token-file and --out-dir are required");
+  const check = argv.includes("--check");
+  if ((statSync(tokenFile).mode & 0o077) !== 0) console.log("warning: the token file is readable by other users; chmod 600 it");
+  const token = readFileSync(tokenFile, "utf8").trim();
+  if (!token || /\s/.test(token)) throw new Error("the token file must contain exactly one token");
   const cf = cloudflare(token);
   const home = mkdtempSync(join(tmpdir(), "site-bootstrap-home-"));
+  const secrets = [token];
   try {
-    const verified = await verifyToken(cf, args.accountId);
-    if (verified.kind !== "account") throw new Error("use an account-owned token (Manage Account → API Tokens), not a user token");
-    console.log(`token: account-owned, ${verified.status}${verified.expiresOn ? `, expires ${verified.expiresOn}` : ", no expiry"}`);
-    console.log(`account: ${(await accountName(cf, args.accountId)) ?? "(name not readable with this token)"} (${args.accountId})`);
-
-    let subdomain: string | undefined;
-    try {
-      subdomain = args.check ? await getWorkersSubdomain(cf, args.accountId) : (await ensureWorkersSubdomain(cf, args.accountId, args.subdomain)).subdomain;
-    } catch (error) {
-      // The account-level subdomain endpoint accepts the legacy "Workers Scripts" permissions only;
-      // without them, trust --subdomain (from the dashboard) and let the store probe confirm it.
-      if (!args.subdomain) throw error;
-      console.log(`workers.dev subdomain not readable with this token; using --subdomain ${args.subdomain}`);
-      subdomain = args.subdomain;
-    }
-    if (!subdomain) throw new Error("no workers.dev subdomain: pass --subdomain <name>");
+    const subdomain = await subdomainOf(cf, accountId, arg(argv, "--subdomain"), check);
     console.log(`workers.dev subdomain: ${subdomain}`);
+    const alchemy = (args: string[], extra: Record<string, string>) => {
+      const cwd = mkdtempSync(join(tmpdir(), "site-bootstrap-cwd-"));
+      try {
+        const res = spawnSync(join(pkg, "node_modules/.bin/alchemy"), [...args, "--config", join(pkg, "alchemy.run.ts")], {
+          cwd,
+          encoding: "utf8",
+          env: { PATH: process.env.PATH, HOME: home, ALCHEMY_HOME: join(home, ".alchemy"), ALCHEMY_PLAIN: "1", DO_NOT_TRACK: "1", ALCHEMY_TELEMETRY_DISABLED: "1", SITE_ALLOW_LOCAL_REMOTE: "1", CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: accountId, CLOUDFLARE_WORKERS_SUBDOMAIN: subdomain, ...extra },
+        });
+        console.log(redact(`${res.stdout ?? ""}${res.stderr ?? ""}`, secrets).trim().split("\n").map((l) => `  | ${l}`).join("\n"));
+        if (res.status !== 0) throw new Error(`alchemy ${args.join(" ")} failed (exit ${res.status})`);
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    };
 
-    if (!args.check) {
-      mkdirSync(args.outDir, { recursive: true, mode: 0o700 });
-      chmodSync(args.outDir, 0o700);
+    if (!check) mkdirSync(outDir, { recursive: true, mode: 0o700 });
+    const bearers: Record<string, string> = {};
+    for (const store of Object.values(stateStores(base))) {
+      if ((await workerAccess(cf, accountId, store)) === "absent") {
+        if (check) {
+          console.log(`state store ${store}: absent`);
+          continue;
+        }
+        console.log(`state store ${store}: absent, bootstrapping…`);
+        alchemy(["state", "bootstrap"], { SITE_STATE: "cloudflare", SITE_STATE_STORE: store });
+      }
+      alchemy(["state", "list"], { SITE_STATE: "cloudflare", SITE_STATE_STORE: store });
+      const bearer = findCachedStoreToken(home, store);
+      if (!bearer) throw new Error(`could not read the bearer token of ${store}`);
+      secrets.push(bearer);
+      const probe = await fetch(`${stateStoreUrl(store, subdomain)}/state/stacks`, { headers: { authorization: `Bearer ${bearer}` } });
+      await probe.arrayBuffer();
+      if (probe.status !== 200) throw new Error(`${store} refuses its own bearer token (HTTP ${probe.status})`);
+      console.log(`state store ${store}: present`);
+      bearers[store] = bearer;
+      if (!check) {
+        const file = join(outDir, `${store}.token`);
+        writeFileSync(file, bearer, { mode: 0o600 });
+        chmodSync(file, 0o600);
+      }
     }
-    const ctx: Ctx = { token, accountId: args.accountId, subdomain, home };
-    const prodStore = await ensureStore(cf, ctx, STATE_STORES.production, args.outDir, args.check);
-    const previewStore = await ensureStore(cf, ctx, STATE_STORES.preview, args.outDir, args.check);
-    await ensureWorker(cf, ctx, "production", prodStore?.bearer, args.check);
-    await ensureWorker(cf, ctx, "staging", previewStore?.bearer, args.check);
-    console.log(permissionReport(subdomain));
+
+    const prod = workerName(base, "production");
+    if ((await workerAccess(cf, accountId, prod)) === "present") console.log(`Worker ${prod}: present (left as it is)`);
+    else if (check) console.log(`Worker ${prod}: absent`);
+    else {
+      console.log(`Worker ${prod}: absent, creating it with a placeholder page…`);
+      const dir = mkdtempSync(join(tmpdir(), "site-placeholder-"));
+      mkdirSync(join(dir, "assets"));
+      writeFileSync(join(dir, "assets", "index.html"), `<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex"><title>${config.project}</title><p>First deploy pending.</p>\n`);
+      if (config.site.server) {
+        mkdirSync(join(dir, "server"));
+        writeFileSync(join(dir, "server", "index.js"), "export default { fetch: (r, env) => env.ASSETS.fetch(r) };\n");
+      }
+      try {
+        alchemy(["deploy", "--stage", "production", "--yes", "--no-input"], { SITE_STATE: "http", SITE_STATE_STORE: stateStores(base).production, SITE_STATE_TOKEN: bearers[stateStores(base).production] ?? "", SITE_ARTIFACT_DIR: dir });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log(
+      [
+        "",
+        "OWNER — create two ACCOUNT API tokens (Manage Account → API Tokens → Custom token), expiry ≤ 1 year:",
+        `  ci-${base}-production   Workers · Specified Workers: ${prod} · Editor        (nothing else)`,
+        `  ci-${base}-preview      Workers Scripts · Edit, account-wide                  (creates/deletes ${base}-pr-<n>)`,
+        "  The preview token can also modify production (Cloudflare cannot scope by name prefix): docs/limits.md L1.",
+        "  Then DELETE the temporary bootstrap token.",
+        "",
+        "AGENT — configure GitHub (reads token files, never echoes them):",
+        `  node tooling/setup-github.mjs --repo <owner/name> --reviewer <login> --account-id ${accountId} --subdomain ${subdomain} \\`,
+        `    --prod-token-file <file> --preview-token-file <file> --state-dir ${outDir} --apply`,
+        "Then delete every token file.",
+      ].join("\n"),
+    );
   } catch (error) {
-    throw new Error(redact(error instanceof Error ? error.message : String(error), [token]));
+    throw new Error(redact(error instanceof Error ? error.message : String(error), secrets));
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

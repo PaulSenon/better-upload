@@ -1,3 +1,5 @@
+// Origin: webmcp-sdk infra/docs/src/unzip.ts @52311db (PR #7), copied verbatim. Since kit v0.1.0 the
+// KIT is the reference: fixes land here first, then flow to every vendored copy (docs/updating.md).
 // Safe extraction of an untrusted build artifact (a ZIP from the GitHub artifacts API) in the
 // privileged deploy job. Dependency-free (node:zlib). Fail closed on anything unusual:
 //   - entry names: relative, `/`-separated, no `..`/empty/`.` segments, no backslash, no drive

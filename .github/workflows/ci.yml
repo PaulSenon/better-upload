@@ -2,16 +2,13 @@
 # credentials never persisted. The job names below are the check-run names the site deploy gate
 # requires (infra/site/src/gate.ts): rename them together.
 #
-# Real providers (R2, AWS) are NOT tested on PRs: their keys live in the `cloud-tests`
-# environment, which only releases secrets to runs on main (see cloud-tests below).
+# Real providers (R2, AWS) are NOT tested here: see cloud-tests.yml (main only, never PR-triggered).
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: "43 5 * * 2" # Tuesdays: real-provider integration on main
   workflow_dispatch:
 
 permissions: {}
@@ -42,6 +39,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test # packages, infra/site (deploy logic) and tooling/release (release logic)
       - run: pnpm check:packages
+      - run: pnpm check:workflows # delivery kit invariants W1–W9
       - name: Change note
         if: github.event_name == 'pull_request'
         env:
@@ -68,38 +66,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm minio:up
       - run: pnpm test:integration # MinIO only
-
-  # Real R2 / AWS buckets, from main only. The environment's deployment branch policy is `main`,
-  # so a PR (even one editing this file) cannot obtain these keys. Keys: scoped to one test bucket.
-  cloud-tests:
-    name: cloud-tests
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.CLOUD_TESTS_ENABLED == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    environment: cloud-tests # branch policy: main only
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-          package-manager-cache: false # holds secrets: no cache
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm minio:up
-      - run: pnpm test:integration
-        env:
-          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          AWS_BUCKET: ${{ vars.AWS_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
   convex:
     name: convex
@@ -180,6 +146,20 @@ jobs:
           name: playwright-report-${{ matrix.browser }}
           path: tests/e2e/playwright-report
           retention-days: 7
+
+  # From the delivery kit: required by the ruleset (PR-only, so not part of the deploy gate).
+  dependency-review:
+    name: dependency-review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime
 
   workflow-lint:
     name: workflow-lint

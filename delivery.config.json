@@ -1,0 +1,40 @@
+{
+  "project": "better-upload",
+  "site": {
+    "name": "site",
+    "worker": "better-upload-site",
+    "artifact": "apps/web/dist/deploy",
+    "server": true,
+    "serverEntry": "server.js",
+    "htmlHandling": "drop-trailing-slash",
+    "smokePaths": ["/", "/docs", "/docs/quick-start", "/r/registry.json", "/llms.txt", "/api/search"]
+  },
+  "previews": {
+    "enabled": true,
+    "mode": "dynamic",
+    "requiredChecks": [
+      "check",
+      "integration",
+      "convex",
+      "e2e (chromium)",
+      "e2e (firefox)",
+      "e2e (webkit)",
+      "e2e (mobile-safari)",
+      "workflow-lint",
+      "site-build"
+    ],
+    "gateTimeoutMinutes": 45
+  },
+  "release": {
+    "packages": [
+      "packages/client",
+      "packages/convex",
+      "packages/core",
+      "packages/react",
+      "packages/s3",
+      "packages/server"
+    ],
+    "branches": { "main": "latest", "next": "next" },
+    "mode": "stage"
+  }
+}

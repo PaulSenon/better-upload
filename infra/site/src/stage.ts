@@ -1,138 +1,125 @@
-// Stage model for the docs site. Pure functions only: imported by alchemy.run.ts, the CI helpers
-// and the unit tests, so that the deployed names, URLs and state stores can be checked without
-// credentials.
+// Stage model. Pure functions: names, URLs, state stores and headers are checkable without
+// credentials. Adapted from webmcp-sdk infra/docs/src/stage.ts.
 //
-// One Cloudflare account holds everything. Names are NOT a security boundary: a Cloudflare token
-// is limited by the Workers it is scoped to (per-Worker roles), never by a name prefix. The guards
-// here only stop mistakes (wrong stage, wrong store); isolation comes from the tokens.
-
-export type RemoteStage = "production" | "staging" | `pr-${number}`;
-
-export const PRODUCTION = "production";
-export const STAGING = "staging";
-export const WORKER_BASE_NAME = "better-upload-site";
-
-/**
- * Alchemy state-store Workers, one per trust level, so the staging/preview credentials can never
- * read or write production state: each store has its own bearer token.
- */
-export const STATE_STORES = {
-  production: "better-upload-site-state",
-  preview: "better-upload-site-preview-state",
-} as const;
-export type StateStoreName = (typeof STATE_STORES)[keyof typeof STATE_STORES];
-
-const PR_STAGE = /^pr-([1-9][0-9]{0,6})$/;
-// Alchemy stage syntax ([a-z0-9][-_a-z0-9]*), kept short so derived Worker names stay < 63 chars.
-const ANY_STAGE = /^[a-z0-9][-_a-z0-9]{0,39}$/;
+// One Cloudflare account holds every stage. Names are NOT a security boundary (a token is limited
+// by its scopes, never by a name prefix); these guards stop mistakes, the tokens and the
+// environments give isolation (docs/limits.md).
 
 export type StageKind = "production" | "staging" | "preview" | "local";
 
+export const PRODUCTION = "production";
+export const STAGING = "staging";
+
+const PR_STAGE = /^pr-([1-9][0-9]{0,6})$/;
+const ANY_STAGE = /^[a-z0-9][-_a-z0-9]{0,39}$/;
+
 export function stageKind(stage: string): StageKind {
-  if (!ANY_STAGE.test(stage)) {
-    throw new Error(`invalid stage name ${JSON.stringify(stage)}`);
-  }
+  if (!ANY_STAGE.test(stage)) throw new Error(`invalid stage name ${JSON.stringify(stage)}`);
   if (stage === PRODUCTION) return "production";
   if (stage === STAGING) return "staging";
   if (PR_STAGE.test(stage)) return "preview";
-  // Look-alikes are refused: they would read as production/staging/previews to a human.
+  // Look-alikes would read as a CI stage to a human: refused.
   if (stage.startsWith("pr-") || stage === "prod" || stage === "stage" || stage.includes("state")) {
     throw new Error(`stage ${JSON.stringify(stage)} is reserved; use "production", "staging" or "pr-<number>"`);
   }
   return "local";
 }
 
-export function isRemoteStage(stage: string): stage is RemoteStage {
-  return stageKind(stage) !== "local";
-}
+export const isRemoteStage = (stage: string) => stageKind(stage) !== "local";
 
-/** Stage for a pull request number, validated (the number comes from the event payload). */
 export function previewStage(prNumber: string | number): `pr-${number}` {
   const stage = `pr-${String(prNumber)}`;
   if (!PR_STAGE.test(stage)) throw new Error(`invalid pull request number ${JSON.stringify(prNumber)}`);
   return stage as `pr-${number}`;
 }
 
-/**
- * Cloudflare Worker script name. Explicit (not Alchemy's derived physical name) so the
- * workers.dev URL is known before the deploy and can be baked into the static build (SITE_URL),
- * and so per-Worker token scopes can name it. Lowercase letters, digits and dashes only.
- */
-export function workerName(stage: string): string {
-  const kind = stageKind(stage);
-  if (kind === "production") return WORKER_BASE_NAME;
-  return `${WORKER_BASE_NAME}-${stage.replaceAll("_", "-")}`;
+export function prNumberOf(stage: string): number | undefined {
+  const m = PR_STAGE.exec(stage);
+  return m ? Number(m[1]) : undefined;
 }
 
-/** The state store a remote stage must use. Local stages use local state. */
-export function stateStoreFor(stage: string): StateStoreName {
-  const kind = stageKind(stage);
-  if (kind === "production") return STATE_STORES.production;
-  if (kind === "staging" || kind === "preview") return STATE_STORES.preview;
-  throw new Error(`local stage ${JSON.stringify(stage)} has no remote state store`);
+/** Explicit Worker name, so the URL is known before deploying and token scopes can name it. */
+export function workerName(base: string, stage: string): string {
+  return stageKind(stage) === "production" ? base : `${base}-${stage.replaceAll("_", "-")}`;
+}
+
+/** Worker names of previews, for the orphan sweep. */
+export function previewNumberFromWorker(base: string, name: string): number | undefined {
+  if (!name.startsWith(`${base}-`)) return undefined;
+  return prNumberOf(name.slice(base.length + 1));
 }
 
 const SUBDOMAIN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
-export function assertSubdomain(accountSubdomain: string): string {
-  if (!SUBDOMAIN.test(accountSubdomain)) {
-    throw new Error(`invalid workers.dev account subdomain ${JSON.stringify(accountSubdomain)}`);
-  }
-  return accountSubdomain;
+export function assertSubdomain(subdomain: string): string {
+  if (!SUBDOMAIN.test(subdomain)) throw new Error(`invalid workers.dev subdomain ${JSON.stringify(subdomain)}`);
+  return subdomain;
 }
 
-/** https://<worker>.<account-subdomain>.workers.dev/ — the URL Cloudflare serves the Worker at. */
-export function workersDevUrl(stage: string, accountSubdomain: string): string {
-  return `https://${workerName(stage)}.${assertSubdomain(accountSubdomain)}.workers.dev/`;
+export const workersDevUrl = (base: string, stage: string, subdomain: string) =>
+  `https://${workerName(base, stage)}.${assertSubdomain(subdomain)}.workers.dev/`;
+
+/** Two Alchemy state stores, one per trust level: preview credentials never hold production state. */
+export function stateStores(base: string) {
+  return { production: `${base}-state`, preview: `${base}-preview-state` } as const;
 }
 
-/** The state-store Worker's own workers.dev origin (no trailing slash, as Alchemy builds it). */
-export function stateStoreUrl(store: StateStoreName, accountSubdomain: string): string {
-  return `https://${store}.${assertSubdomain(accountSubdomain)}.workers.dev`;
+export function stateStoreFor(base: string, stage: string): string {
+  const kind = stageKind(stage);
+  if (kind === "local") throw new Error(`local stage ${stage} has no remote state store`);
+  return kind === "production" ? stateStores(base).production : stateStores(base).preview;
 }
 
-/** Only production may be indexed by search engines; staging, previews and local stages are noindex. */
-export function isIndexable(stage: string): boolean {
-  return stageKind(stage) === "production";
-}
-
-// --- preview mode -------------------------------------------------------------------------------
-
-/**
- * How PRs are previewed (repository variable SITE_PREVIEW_MODE):
- * - `staging` (default): one fixed Worker `better-upload-site-staging`, created once at bootstrap;
- *   its token is Editor on that Worker only, so it cannot create, delete or touch production.
- *   The last PR deployed wins.
- * - `dynamic`: one Worker per PR (`better-upload-site-pr-<n>`), created and destroyed by CI. Needs an
- *   account-wide Workers Admin token (which can also modify or delete production), so it is only
- *   allowed when the `site-preview` environment has a required reviewer.
- */
-export type PreviewMode = "staging" | "dynamic";
-
-export function parsePreviewMode(value: string | undefined): PreviewMode {
-  if (value === undefined || value === "" || value === "staging") return "staging";
-  if (value === "dynamic") return "dynamic";
-  throw new Error(`SITE_PREVIEW_MODE must be "staging" or "dynamic", not ${JSON.stringify(value)}`);
-}
-
-/** The stage a PR deploys to in a mode. */
-export function prStage(mode: PreviewMode, prNumber: string | number): RemoteStage {
-  const pr = previewStage(prNumber); // validates the number in both modes
-  return mode === "dynamic" ? pr : STAGING;
-}
-
-// --- revision label -----------------------------------------------------------------------------
+export const stateStoreUrl = (store: string, subdomain: string) => `https://${store}.${assertSubdomain(subdomain)}.workers.dev`;
 
 const REVISION = /^(main|pr-[1-9][0-9]{0,6})@[0-9a-f]{7}$/;
 
-/** `pr-6@abc1234` or `main@abc1234`: what a non-production stage currently serves (response header). */
-export function revisionLabel(source: { pr?: string | number; sha: string }): string {
+/** `pr-6@abc1234` / `main@abc1234`: served as a response header so humans and smoke tests see what is live. */
+export function revisionLabel(source: { pr?: number; sha: string }): string {
+  if (!/^[0-9a-f]{40}$/.test(source.sha)) throw new Error("invalid commit SHA");
   const label = `${source.pr ? previewStage(source.pr) : "main"}@${source.sha.slice(0, 7)}`;
-  if (!REVISION.test(label)) throw new Error(`invalid revision ${JSON.stringify(label)}`);
+  if (!REVISION.test(label)) throw new Error(`invalid revision ${label}`);
   return label;
 }
 
 export function assertRevision(label: string): string {
   if (!REVISION.test(label)) throw new Error(`invalid revision label ${JSON.stringify(label)}`);
   return label;
+}
+
+// local: see renderHeaders.
+export const LOCAL_SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
+  [
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; media-src 'self'; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests",
+  ],
+  ["Strict-Transport-Security", "max-age=63072000; includeSubDomains"],
+  ["X-Frame-Options", "DENY"],
+  ["Permissions-Policy", "accelerometer=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"],
+  ["Cross-Origin-Opener-Policy", "same-origin"],
+];
+
+/**
+ * `_headers` for static assets: only production is indexable; every stage says which commit it
+ * serves. Owned by the infra (overrides any `_headers` in the build output).
+ */
+export function renderHeaders(stage: string, revision?: string): string {
+  const lines = ["/*", "  X-Content-Type-Options: nosniff", "  Referrer-Policy: strict-origin-when-cross-origin"];
+  if (stageKind(stage) !== "production") lines.push("  X-Robots-Tag: noindex, nofollow");
+  if (revision) lines.push(`  X-Delivery-Revision: ${assertRevision(revision)}`);
+  // local: Better Upload's security headers and immutable chunks (kept from its pre-kit infra; proposed
+  // upstream). `worker-src blob:` because the live demo hashes in Web Workers created from a Blob URL;
+  // `'unsafe-inline'` because TanStack Start inlines its hydration data.
+  lines.push(...LOCAL_SECURITY_HEADERS.map(([name, value]) => `  ${name}: ${value}`));
+  lines.push("/assets/*", "  Cache-Control: public, max-age=31536000, immutable");
+  // shadcn registry: fetched cross-origin by the shadcn CLI and by browsers.
+  // Previews change on every push: never cached. Production: 5 minutes.
+  lines.push("/r/*", "  Access-Control-Allow-Origin: *", stageKind(stage) === "production" ? "  Cache-Control: public, max-age=300" : "  Cache-Control: no-cache");
+  return `${lines.join("\n")}\n`;
+}
+
+/** The stage a PR deploys to. */
+export function prStage(mode: "dynamic" | "staging", prNumber: number | string): string {
+  const stage = previewStage(prNumber); // validates the number in both modes
+  return mode === "dynamic" ? stage : STAGING;
 }

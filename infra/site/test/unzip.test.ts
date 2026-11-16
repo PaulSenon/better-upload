@@ -1,3 +1,4 @@
+// Origin: webmcp-sdk infra/docs/test/unzip.test.ts @52311db; the kit is the reference since v0.1.0.
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

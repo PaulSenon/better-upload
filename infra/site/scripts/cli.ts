@@ -1,424 +1,332 @@
-// CI helpers for the docs deploy (.github/workflows/site.yml). Inputs come from the environment
-// only, never from argv interpolation in YAML. Outputs go to $GITHUB_OUTPUT / $GITHUB_STEP_SUMMARY.
+// CI helpers for .github/workflows/site.yml and site-deploy.yml. Inputs only from environment
+// variables and the event file (never interpolated into a shell). Outputs to $GITHUB_OUTPUT.
+// In privileged jobs this file always comes from the default branch's checkout.
 //
-//   (node infra/site/scripts/cli.ts <command>)
-//   target       PR_NUMBER?, PREVIEW_MODE?, SUBDOMAIN, SHA?, BUILD_STAGE?, BUILD_URL?
-//                -> stage, worker, store, url, revision
-//   preflight    STAGE, PREVIEW_MODE?, SUBDOMAIN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN,
-//                SITE_STATE_TOKEN, GH_TOKEN, REPO, ENVIRONMENT
-//   plan         GH_TOKEN, REPO, RUN_ID, PREVIEW_MODE?, DEPENDABOT_PREVIEWS?  -> action, sha, pr, stage, reason
-//   fetch-artifact GH_TOKEN, REPO, RUN_ID, ARTIFACT_NAME, DEST, EXPECTED_SHA, EXPECTED_PR?, EXPECTED_STAGE -> dist_dir
-//   status       GH_TOKEN, REPO, SHA, STATE, TARGET_URL?, DESCRIPTION?
-//   teardown-decision GH_TOKEN, REPO, PR_NUMBER, FORCE?           -> destroy
-//   gate         GH_TOKEN, REPO, SHA, GATE_TIMEOUT_S?, GATE_INTERVAL_S?
-//   pr-decision  GH_TOKEN, REPO, PR_NUMBER, BUILT_SHA            -> deploy, reason
-//   comment      GH_TOKEN, REPO, PR_NUMBER, SHA?, RUN_URL, URL?, TARGET?, REASON?, DEPLOY_RESULT?, DEPLOY_STATUS?, TEARDOWN_RESULT?
-//   sweep        GH_TOKEN, REPO (+ deploy credentials, SITE_STATE=http)
-//   manifest     SHA, PR_NUMBER?, STAGE, EVENT, ACTION?, OUT
-//   check-site   SITE_DIST_DIR
-//   headers      STAGE, REVISION?                               -> prints the _headers file
-//   smoke        SMOKE_URL, SITE_DIST_DIR, STAGE, REVISION?
-import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { verifyToken, workerAccess } from "../src/account.ts";
+//   node infra/site/scripts/cli.ts <command>
+//   plan | fetch-artifact | build-target | write-manifest | pr-target | pr-check | main-check | gate | check-artifact | after-deploy | smoke | comment | sweep | delete-worker | preflight
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
+import { MANIFEST, checkArtifact } from "../src/artifact.ts";
 import { checkManifest, pickPr, planFromRun, type PrInfo, type RunInfo } from "../src/deploy-plan.ts";
 import { safeUnzip } from "../src/unzip.ts";
-import { ApiError, cloudflare, github } from "../src/api.ts";
-import { evaluateChecks, type CheckRun } from "../src/gate.ts";
-import { renderHeadersFile } from "../src/headers.ts";
-import { isMainOnly, isolationDecision, probeStateStore, storeDecision } from "../src/isolation.ts";
-import {
-  commentPlan,
-  findPreviewComment,
-  isOrphan,
-  parsePreviewStages,
-  previewDecision,
-  renderComment,
-  type IssueComment,
-  type PullRequestState,
-} from "../src/preview.ts";
-import { checkSiteDir } from "../src/site-dir.ts";
-import { runSmoke } from "../src/smoke.ts";
-import {
-  WORKER_BASE_NAME,
-  assertRevision,
-  assertSubdomain,
-  isIndexable,
-  parsePreviewMode,
-  previewStage,
-  prStage,
-  revisionLabel,
-  stageKind,
-  stateStoreFor,
-  stateStoreUrl,
-  workerName,
-  workersDevUrl,
-} from "../src/stage.ts";
+import { join } from "node:path";
+import { cloudflare, github, redact, type GitHubClient } from "../src/api.ts";
+import { isMainOnly, isolationDecision, probeStateStore, storeDecision, verifyToken, workerAccess } from "../src/isolation.ts";
+import { loadConfig, previewMode, serverEntry } from "../src/config.ts";
+import { evaluateChecks, type CheckRun, type CommitStatus } from "../src/gate.ts";
+import { afterDeploy, findComment, isOrphan, previewAction, previewNumbers, previewNumbersFromState, renderComment, type CommentStatus, type IssueComment, type PullRequest } from "../src/preview.ts";
+import { prStage, revisionLabel, stateStoreFor, stateStoreUrl, workerName, workersDevUrl } from "../src/stage.ts";
 
-const env = (name: string): string => {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is not set`);
-  return value;
+const config = loadConfig();
+const base = config.site.worker;
+const env = (name: string, required = true): string => {
+  const v = process.env[name] ?? "";
+  if (required && !v) throw new Error(`${name} is required`);
+  return v;
 };
-const output = (key: string, value: string) => {
-  if (/[\r\n]/.test(value)) throw new Error(`output ${key} contains a line break`);
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
-  console.log(`${key}=${value}`);
-};
-const summary = (markdown: string) => {
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
-};
+function output(values: Record<string, string | number | boolean>) {
+  const lines = Object.entries(values).map(([k, v]) => {
+    const s = String(v);
+    if (/[\r\n]/.test(s)) throw new Error(`output ${k} contains a newline`);
+    return `${k}=${s}\n`;
+  });
+  process.stdout.write(lines.join(""));
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, lines.join(""));
+}
+const repo = () => env("REPO");
+const defaultBranch = () => env("DEFAULT_BRANCH");
+const gh = (): GitHubClient => github(env("GH_TOKEN"));
 
-const commands: Record<string, () => Promise<void> | void> = {
-  // Stage, Worker, state store and URL from trusted inputs (event payload, repository variables,
-  // this checkout of main), never from the build job's outputs, which ran untrusted code. When the
-  // build's values are given, they must match. PR -> staging (default) or pr-<n> (dynamic mode);
-  // no PR -> production (from refs/heads/main only).
-  target() {
-    const pr = process.env.PR_NUMBER ?? "";
-    const mode = parsePreviewMode(process.env.PREVIEW_MODE);
-    if (!pr && process.env.GITHUB_REF && process.env.GITHUB_REF !== "refs/heads/main") {
-      throw new Error(`production is deployed from refs/heads/main only, not ${process.env.GITHUB_REF}`);
-    }
-    const stage = pr ? prStage(mode, pr) : "production";
-    // The build job may run before Cloudflare is configured: then it only needs the stage.
-    if (!process.env.SUBDOMAIN && process.env.SUBDOMAIN_OPTIONAL === "1") {
-      output("stage", stage);
-      return;
-    }
-    const subdomain = assertSubdomain(env("SUBDOMAIN"));
-    const url = workersDevUrl(stage, subdomain);
-    for (const [key, trusted] of [["BUILD_STAGE", stage], ["BUILD_URL", url]] as const) {
-      const claimed = process.env[key];
-      if (claimed && claimed !== trusted) {
-        throw new Error(`${key} from the build job (${JSON.stringify(claimed)}) differs from ${JSON.stringify(trusted)}`);
+async function getPr(client: GitHubClient, n: number): Promise<PullRequest | undefined> {
+  try {
+    return await client.get<PullRequest>(`/repos/${repo()}/pulls/${n}`);
+  } catch (error) {
+    if ((error as { status?: number }).status === 404) return undefined;
+    throw error;
+  }
+}
+
+function targetOutputs(stage: string, sha: string, pr?: number) {
+  const subdomain = env("SUBDOMAIN");
+  return {
+    stage,
+    sha,
+    pr: pr ?? "",
+    worker: workerName(base, stage),
+    url: workersDevUrl(base, stage, subdomain),
+    store: stateStoreFor(base, stage),
+    revision: revisionLabel(pr ? { pr, sha } : { sha }),
+  };
+}
+
+const commands: Record<string, () => Promise<void>> = {
+  /**
+   * deploy-plan: what to do for a completed <site> run. Only RUN_ID comes from the event; the run,
+   * the PR (several lookups, must have this exact head) and the default branch's head come from
+   * the API (deploy-plan.ts). Outputs kind = preview | teardown | production | skip.
+   */
+  async plan() {
+    const client = gh();
+    const runId = env("RUN_ID");
+    if (!/^\d+$/.test(runId)) throw new Error("RUN_ID must be a number");
+    const run = await client.get<RunInfo>(`/repos/${repo()}/actions/runs/${runId}`);
+    const owner = repo().split("/")[0];
+    const candidates: PrInfo[] = [];
+    if (run.head_repository?.full_name === repo() && run.event === "pull_request") {
+      for (const n of new Set((run.pull_requests ?? []).map((p) => p.number))) {
+        const pr = await getPr(client, n);
+        if (pr) candidates.push(pr as unknown as PrInfo);
       }
+      if (run.head_branch) candidates.push(...(await client.list<PrInfo>(`/repos/${repo()}/pulls?state=all&per_page=100&head=${encodeURIComponent(`${owner}:${run.head_branch}`)}`)));
+      candidates.push(...(await client.list<PrInfo>(`/repos/${repo()}/commits/${run.head_sha}/pulls?per_page=100`)));
     }
-    output("stage", stage);
-    output("worker", workerName(stage));
-    output("store", stateStoreFor(stage));
-    output("url", url);
-    if (stage !== "production" && process.env.SHA) output("revision", revisionLabel({ pr, sha: process.env.SHA }));
+    const pr = pickPr(candidates, run, repo());
+    const mainHead = run.event === "push" ? (await client.get<{ sha: string }>(`/repos/${repo()}/commits/${defaultBranch()}`)).sha : undefined;
+    let plan = planFromRun({
+      run,
+      repo: repo(),
+      defaultBranch: defaultBranch(),
+      workflowPath: `.github/workflows/${config.site.name}.yml`,
+      previews: config.previews.enabled,
+      pr,
+      mode: previewMode(config),
+      botPreviews: process.env.BOT_PREVIEWS === "true",
+      mainHead,
+    });
+    if (plan.action === "deploy-preview" || plan.action === "deploy-production") {
+      const artifacts = await client.list<{ name: string; expired: boolean }>(`/repos/${repo()}/actions/runs/${runId}/artifacts?per_page=100`, "artifacts");
+      if (!artifacts.some((a) => a.name === config.site.name && !a.expired)) plan = { action: "skip", reason: `run ${runId} has no ${config.site.name} artifact`, ...("pr" in plan ? { pr: plan.pr } : {}) };
+    }
+    console.log(`plan for run ${runId} (${run.head_sha.slice(0, 7)}): ${plan.action} — ${plan.reason}`);
+    const kind = { "deploy-preview": "preview", "teardown-preview": "teardown", "deploy-production": "production", skip: "skip" }[plan.action];
+    const pn = "pr" in plan && plan.pr !== undefined ? plan.pr : undefined;
+    output({ kind, reason: plan.reason.replace(/[\r\n]/g, " "), run_id: runId, pr: pn ?? "", ...("stage" in plan ? targetOutputs(plan.stage, run.head_sha, pn) : { sha: run.head_sha }) });
   },
-  // Before any alchemy call with a deploy token. Refuses: a token that is not an active account
-  // token of this account; a state-store token that is not this stage's store (or a store of
-  // another version); a production/staging Worker the token cannot see (bootstrap missing or token
-  // not scoped to it); a preview-side token that can reach production (dynamic mode, or a staging
-  // token broader than its Worker) unless the environment has a required reviewer.
+
+  /**
+   * Download RUN_ID's artifact as a ZIP through the API, extract it with the hardened extractor
+   * into an empty DEST (never executed), check the manifest against EXPECT_* and the layout.
+   */
+  async "fetch-artifact"() {
+    const token = env("GH_TOKEN");
+    const runId = env("RUN_ID");
+    if (!/^\d+$/.test(runId)) throw new Error("RUN_ID must be a number");
+    const list = await gh().list<{ id: number; name: string; expired: boolean; size_in_bytes: number }>(`/repos/${repo()}/actions/runs/${runId}/artifacts?per_page=100`, "artifacts");
+    const artifact = list.find((a) => a.name === config.site.name && !a.expired);
+    if (!artifact) throw new Error(`run ${runId} has no unexpired artifact ${config.site.name}`);
+    if (artifact.size_in_bytes > 256 * 1024 * 1024) throw new Error("artifact larger than 256 MiB");
+    const res = await fetch(`https://api.github.com/repos/${repo()}/actions/artifacts/${artifact.id}/zip`, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "monorepo-delivery-kit" } });
+    if (!res.ok) throw new Error(`artifact download failed: HTTP ${res.status}`);
+    const dest = env("DEST");
+    const files = safeUnzip(Buffer.from(await res.arrayBuffer()), dest);
+    const pr = env("EXPECT_PR", false);
+    const m = checkManifest(JSON.parse(readFileSync(join(dest, MANIFEST), "utf8")), { sha: env("EXPECT_SHA"), pr: pr ? Number(pr) : null, stage: env("EXPECT_STAGE") });
+    const report = checkArtifact(dest, { server: config.site.server, serverEntry: serverEntry(config) });
+    console.log(`artifact ${config.site.name} ok: ${files} entries, manifest ${m.stage}@${m.sha.slice(0, 7)}, ${report.bytes} bytes`);
+    output({ dir: dest });
+  },
+
+  /** Stage outputs for a PR number (manual destroy, sweep). Dynamic mode only. */
+  async "pr-target"() {
+    if (previewMode(config) !== "dynamic") throw new Error("per-PR stages exist only in dynamic preview mode");
+    const stage = prStage("dynamic", env("PR_NUMBER"));
+    output({ stage, worker: workerName(base, stage), store: stateStoreFor(base, stage) });
+  },
+
+  /** Is this SHA still the open, non-draft, same-repo head of the PR? (CI already green) */
+  async "pr-check"() {
+    const pr = await getPr(gh(), Number(env("PR_NUMBER")));
+    const act = pr ? previewAction(pr, env("SHA"), "success", { repo: repo(), botPreviews: process.env.BOT_PREVIEWS === "true" }) : ({ action: "teardown", reason: "closed" } as const);
+    const deploy = act.action === "deploy";
+    if (!deploy) console.log(`::notice::preview not deployed: ${act.action === "teardown" ? act.reason : act.reason}`);
+    output({ deploy });
+  },
+
+  /** Is this SHA still the head of the default branch? (out-of-order pushes) */
+  async "main-check"() {
+    const head = (await gh().get<{ sha: string }>(`/repos/${repo()}/commits/${defaultBranch()}`)).sha;
+    const fresh = head === env("SHA");
+    if (!fresh) console.log(`::notice::${defaultBranch()} moved to ${head}: the newer run deploys`);
+    output({ deploy: fresh });
+  },
+
+  /** Wait (bounded) until every required check of this exact SHA is green; fail closed. */
+  async gate() {
+    const required = config.previews.requiredChecks;
+    const client = gh();
+    const sha = env("SHA");
+    const deadline = Date.now() + config.previews.gateTimeoutMinutes * 60_000;
+    for (;;) {
+      const runs = await client.list<CheckRun>(`/repos/${repo()}/commits/${sha}/check-runs?per_page=100`, "check_runs");
+      const statuses = await client.list<CommitStatus>(`/repos/${repo()}/commits/${sha}/statuses?per_page=100`);
+      const r = evaluateChecks(runs, required, statuses);
+      console.log(`gate ${sha.slice(0, 7)}: ${r.state} passed=[${r.passed}] pending=[${r.pending}] missing=[${r.missing}] failed=[${r.failed}]`);
+      if (r.state === "pass") return;
+      if (r.state === "fail") throw new Error(`required checks failed: ${r.failed.join(", ")}`);
+      if (Date.now() > deadline) throw new Error(`gate timed out waiting for ${[...r.pending, ...r.missing].join(", ")}`);
+      await sleep(30_000);
+    }
+  },
+
+  /** In the unprivileged build: stage, URL to bake in, artifact dir. Not trusted by the deploy. */
+  async "build-target"() {
+    const pr = env("PR_NUMBER", false);
+    const stage = pr ? prStage(previewMode(config), pr) : "production";
+    const subdomain = env("SUBDOMAIN", false);
+    if (!subdomain) console.log("::notice::<SITE>_WORKERS_SUBDOMAIN is not set: building without SITE_URL");
+    output({ stage, url: subdomain ? workersDevUrl(base, stage, subdomain) : "", dir: config.site.artifact });
+  },
+
+  async "write-manifest"() {
+    const pr = env("PR_NUMBER", false);
+    const sha = env("SHA");
+    if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("SHA must be a full commit SHA");
+    const manifest = { sha, pr: pr ? Number(pr) : null, stage: env("STAGE"), event: env("EVENT"), action: process.env.ACTION || null };
+    writeFileSync(join(env("SITE_ARTIFACT_DIR"), MANIFEST), `${JSON.stringify(manifest)}\n`);
+  },
+
+  /** Layout and limits (build side; the deploy side runs it inside fetch-artifact). */
+  async "check-artifact"() {
+    const report = checkArtifact(env("SITE_ARTIFACT_DIR"), { server: config.site.server, serverEntry: serverEntry(config) });
+    for (const w of report.warnings) console.log(`::warning::${w}`);
+    console.log(`artifact ok: ${report.files} files, ${report.bytes} bytes${report.hasServer ? `, server ~${Math.round(report.serverGzipBytes / 1024)} KiB gzip` : ""}`);
+  },
+
+  async "after-deploy"() {
+    const action = afterDeploy(await getPr(gh(), Number(env("PR_NUMBER"))));
+    if (action === "destroy") console.log("::warning::the PR was closed or drafted during the deploy: destroying the preview");
+    output({ action });
+  },
+
+  async smoke() {
+    const url = env("SMOKE_URL");
+    const revision = env("REVISION", false);
+    for (const path of config.site.smokePaths) {
+      let last = "";
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        // Follows redirects (e.g. /docs -> /docs/ trailing-slash handling) but only on the same origin.
+        const res = await fetch(new URL(path, url), { headers: { "cache-control": "no-cache" } });
+        if (new URL(res.url).origin !== new URL(url).origin) throw new Error(`${path} redirects off-site to ${res.url}`);
+        const got = res.headers.get("x-delivery-revision");
+        await res.arrayBuffer();
+        // The revision header comes from the asset layer's _headers (static responses).
+        const revisionOk = !revision || config.site.server || got === revision;
+        if (res.status >= 200 && res.status < 300 && revisionOk) {
+          last = "";
+          break;
+        }
+        last = `${path}: HTTP ${res.status}, revision ${got ?? "none"}`;
+        await sleep(attempt * 3_000);
+      }
+      if (last) throw new Error(`smoke test failed: ${last}`);
+      console.log(`smoke ok: ${path}`);
+    }
+  },
+
+  /** Upsert the PR's single preview comment and the `<site>-preview` commit status. */
+  async comment() {
+    const client = gh();
+    const pr = Number(env("PR_NUMBER"));
+    const status = env("STATUS") as CommentStatus;
+    const sha = env("SHA", false) || undefined;
+    const url = env("URL", false) || undefined;
+    const body = renderComment({ project: config.project, status, sha, url, runUrl: env("RUN_URL"), reason: env("REASON", false) || undefined });
+    if (status === "deployed" || status === "failed") {
+      const now = await getPr(client, pr);
+      if (now && sha && now.head.sha !== sha) return console.log(`::notice::PR head moved to ${now.head.sha}: the newer run comments`);
+    }
+    const comments = await client.list<IssueComment>(`/repos/${repo()}/issues/${pr}/comments?per_page=100`);
+    const existing = findComment(comments, config.project);
+    if (existing) await client.send("PATCH", `/repos/${repo()}/issues/comments/${existing.id}`, { body });
+    else if (status === "deployed" || status === "failed") await client.send("POST", `/repos/${repo()}/issues/${pr}/comments`, { body });
+    if (sha && (status === "deployed" || status === "failed")) {
+      await client.send("POST", `/repos/${repo()}/statuses/${sha}`, {
+        state: status === "deployed" ? "success" : "failure",
+        context: `${config.site.name}-preview`,
+        description: status === "deployed" ? "Preview deployed" : "Preview deploy failed",
+        target_url: status === "deployed" ? url : env("RUN_URL"),
+      });
+    }
+  },
+
+  /** Orphan preview Workers: PR closed, draft, from a fork, or gone. */
+  async sweep() {
+    const token = env("CLOUDFLARE_API_TOKEN");
+    const cf = cloudflare(token);
+    const { body } = await cf.request<{ id: string }[]>("GET", `/accounts/${env("CLOUDFLARE_ACCOUNT_ID")}/workers/scripts`);
+    if (!body?.success) throw new Error(redact("cannot list Workers", [token]));
+    const fromWorkers = previewNumbers(base, body.result.map((s) => s.id));
+    const listFile = env("STATE_LIST_FILE", false);
+    const fromState = listFile && existsSync(listFile) ? previewNumbersFromState(readFileSync(listFile, "utf8"), `${config.project}-site`) : [];
+    const numbers = [...new Set([...fromWorkers, ...fromState])].sort((a, b) => a - b);
+    const client = gh();
+    const orphans: number[] = [];
+    for (const n of numbers) if (isOrphan(await getPr(client, n), repo())) orphans.push(n);
+    console.log(`previews: workers [${fromWorkers.join(" ")}] state [${fromState.join(" ")}] orphans: [${orphans.join(" ")}]`);
+    output({ orphans: orphans.join(" ") });
+  },
+
+  /** Fallback after `alchemy destroy`: a preview Worker without state is deleted directly. */
+  async "delete-worker"() {
+    const stage = prStage("dynamic", env("PR_NUMBER"));
+    const name = workerName(base, stage);
+    const token = env("CLOUDFLARE_API_TOKEN");
+    const { status } = await cloudflare(token).request("DELETE", `/accounts/${env("CLOUDFLARE_ACCOUNT_ID")}/workers/scripts/${name}?force=true`);
+    if (status !== 200 && status !== 404) throw new Error(`deleting ${name}: HTTP ${status}`);
+    console.log(status === 404 ? `${name}: already gone` : `${name}: deleted`);
+  },
+
+  /**
+   * Before any alchemy call with a deploy token (WebMCP PR #7 preflight, generalised):
+   * the Cloudflare token is an active ACCOUNT-owned token of this account; the state token is the
+   * stage's store token and the store speaks this Alchemy's state API; the job's environment
+   * releases secrets only to the default branch (or has a reviewer); the token's view of the
+   * stage's Worker and of production is consistent with the stage and preview mode.
+   */
   async preflight() {
     const stage = env("STAGE");
-    const mode = parsePreviewMode(process.env.PREVIEW_MODE);
+    const mode = previewMode(config);
     const accountId = env("CLOUDFLARE_ACCOUNT_ID");
     const cfToken = env("CLOUDFLARE_API_TOKEN");
     const cf = cloudflare(cfToken);
     const verified = await verifyToken(cf, accountId);
     if (verified.kind !== "account") throw new Error("CLOUDFLARE_API_TOKEN must be an account-owned token of this account (Manage Account → API Tokens), not a user token");
 
-    const store = stateStoreFor(stage);
-    const { STATE_STORE_VERSION } = await import("alchemy/State");
-    const probe = await probeStateStore(stateStoreUrl(store, assertSubdomain(env("SUBDOMAIN"))), env("SITE_STATE_TOKEN"));
+    const store = stateStoreFor(base, stage);
+    if (env("SITE_STATE_STORE") !== store) throw new Error(`SITE_STATE_STORE must be ${store} for stage ${stage}`);
+    const { STATE_STORE_VERSION } = (await import("alchemy/State")) as { STATE_STORE_VERSION: number };
+    const probe = await probeStateStore(stateStoreUrl(store, env("SUBDOMAIN")), env("SITE_STATE_TOKEN"));
     const storeOk = storeDecision(probe, STATE_STORE_VERSION, store);
     if (!storeOk.ok) throw new Error(storeOk.reason);
 
-    const gh = github(env("GH_TOKEN"));
     const environment = env("ENVIRONMENT");
-    const repo = env("REPO");
-    const envInfo = await gh.get<{
-      protection_rules?: { type: string; reviewers?: unknown[] }[];
-      deployment_branch_policy?: { protected_branches?: boolean; custom_branch_policies?: boolean } | null;
-    }>(`/repos/${repo}/environments/${environment}`);
-    const reviewers = (envInfo.protection_rules ?? []).filter((r) => r.type === "required_reviewers").reduce((n, r) => n + (r.reviewers?.length ?? 0), 0);
-    const rules = envInfo.deployment_branch_policy?.custom_branch_policies
-      ? await gh.list<{ name: string; type?: string }>(`/repos/${repo}/environments/${environment}/deployment-branch-policies?per_page=100`, "branch_policies")
+    const client = gh();
+    const e = await client.get<{ deployment_branch_policy?: { protected_branches?: boolean; custom_branch_policies?: boolean } | null; protection_rules?: { type: string; reviewers?: unknown[] }[] }>(`/repos/${repo()}/environments/${encodeURIComponent(environment)}`);
+    const reviewers = (e.protection_rules ?? []).filter((r) => r.type === "required_reviewers").reduce((n, r) => n + (r.reviewers?.length ?? 0), 0);
+    const rules = e.deployment_branch_policy?.custom_branch_policies
+      ? await client.list<{ name: string; type?: string }>(`/repos/${repo()}/environments/${encodeURIComponent(environment)}/deployment-branch-policies?per_page=100`, "branch_policies")
       : [];
-    const protection = { reviewers, mainOnly: isMainOnly(envInfo.deployment_branch_policy, rules) };
+    const protection = { reviewers, mainOnly: isMainOnly(e.deployment_branch_policy, rules, defaultBranch()) };
     const decision = isolationDecision({
       stage,
       mode,
-      target: await workerAccess(cf, accountId, workerName(stage)),
-      production: stage === "production" ? undefined : await workerAccess(cf, accountId, workerName("production")),
+      target: await workerAccess(cf, accountId, workerName(base, stage)),
+      production: stage === "production" ? undefined : await workerAccess(cf, accountId, workerName(base, "production")),
       protection,
     });
     if (!decision.ok) throw new Error(decision.reason);
     for (const note of decision.notes) console.log(`::notice::${note}`);
-    console.log(`preflight ok: ${stage} (mode ${mode}), account token active, ${store} v${probe.version}, ${environment}: reviewers ${reviewers}, main-only ${protection.mainOnly}`);
-  },
-  // site-deploy: what to do for a completed `site` run. Only the run id comes from the event;
-  // the run, the PR and main's head are read from the API, and the PR is verified against the
-  // run (head SHA, same repository). See src/deploy-plan.ts.
-  async plan() {
-    const gh = github(env("GH_TOKEN"));
-    const repo = env("REPO");
-    const runId = env("RUN_ID");
-    if (!/^\d+$/.test(runId)) throw new Error("RUN_ID must be a number");
-    const run = await gh.get<RunInfo>(`/repos/${repo}/actions/runs/${runId}`);
-    const owner = repo.split("/")[0];
-    const candidates: PrInfo[] = [];
-    if (run.head_repository?.full_name === repo && run.event === "pull_request") {
-      const numbers = new Set<number>((run.pull_requests ?? []).map((p) => p.number));
-      for (const n of numbers) candidates.push(await gh.get<PrInfo>(`/repos/${repo}/pulls/${n}`));
-      if (run.head_branch) {
-        candidates.push(...(await gh.list<PrInfo>(`/repos/${repo}/pulls?state=all&per_page=100&head=${encodeURIComponent(`${owner}:${run.head_branch}`)}`)));
-      }
-      candidates.push(...(await gh.list<PrInfo>(`/repos/${repo}/commits/${run.head_sha}/pulls?per_page=100`)));
-    }
-    const pr = pickPr(candidates, run, repo);
-    const mainHead = run.event === "pull_request" ? undefined : (await gh.get<{ sha: string }>(`/repos/${repo}/commits/main`)).sha;
-    const plan = planFromRun({
-      run,
-      repo,
-      pr,
-      mode: parsePreviewMode(process.env.PREVIEW_MODE),
-      dependabotPreviews: process.env.DEPENDABOT_PREVIEWS === "true",
-      mainHead,
-    });
-    let final = plan;
-    if (plan.action === "deploy-preview" || plan.action === "deploy-production") {
-      const artifacts = await gh.list<{ name: string; expired: boolean }>(`/repos/${repo}/actions/runs/${runId}/artifacts?per_page=100`, "artifacts");
-      if (!artifacts.some((a) => a.name === `site-${plan.stage}` && !a.expired)) {
-        final = { action: "skip", reason: `the run has no site-${plan.stage} artifact `, ...("pr" in plan ? { pr: plan.pr } : {}) };
-      }
-    }
-    output("action", final.action);
-    output("sha", run.head_sha);
-    output("pr", "pr" in final && final.pr !== undefined ? String(final.pr) : "");
-    output("stage", "stage" in final ? final.stage : "");
-    output("reason", final.reason.replace(/[\r\n]/g, " "));
-    summary(`### Deploy plan for run ${runId} (\`${run.head_sha.slice(0, 7)}\`): **${final.action}** — ${final.reason}`);
-  },
-  // Download a run's artifact as a ZIP through the API and extract it safely into DEST (never
-  // executed; see src/unzip.ts), then check its manifest against the recomputed values and the
-  // dist directory against the publishing rules. Prints dist_dir.
-  async "fetch-artifact"() {
-    const token = env("GH_TOKEN");
-    const gh = github(token);
-    const repo = env("REPO");
-    const runId = env("RUN_ID");
-    if (!/^\d+$/.test(runId)) throw new Error("RUN_ID must be a number");
-    const name = env("ARTIFACT_NAME");
-    const list = await gh.list<{ id: number; name: string; expired: boolean; size_in_bytes: number }>(`/repos/${repo}/actions/runs/${runId}/artifacts?per_page=100`, "artifacts");
-    const artifact = list.find((a) => a.name === name && !a.expired);
-    if (!artifact) throw new Error(`run ${runId} has no unexpired artifact ${name}`);
-    if (artifact.size_in_bytes > 256 * 1024 * 1024) throw new Error("artifact larger than 256 MiB");
-    const res = await fetch(`https://api.github.com/repos/${repo}/actions/artifacts/${artifact.id}/zip`, {
-      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "open-upload-site-infra" },
-    });
-    if (!res.ok) throw new Error(`artifact download failed: HTTP ${res.status}`);
-    const zip = Buffer.from(await res.arrayBuffer());
-    const dest = env("DEST");
-    const files = safeUnzip(zip, dest);
-    const manifest = checkManifest(JSON.parse(readFileSync(join(dest, "manifest.json"), "utf8")), {
-      sha: env("EXPECTED_SHA"),
-      pr: process.env.EXPECTED_PR ? Number(process.env.EXPECTED_PR) : null,
-      stage: env("EXPECTED_STAGE"),
-    });
-    const site = join(dest, "site");
-    const report = checkSiteDir(site);
-    for (const warning of report.warnings) console.log(`::warning::${warning}`);
-    console.log(`artifact ${name} (${files} files) ok: manifest ${manifest.stage}@${manifest.sha.slice(0, 7)}, site ${report.files} files${report.server ? `, Worker ${report.server.modules} modules ${(report.server.gzipBytes / 1024).toFixed(0)} KiB gzip` : ""}`);
-    output("dist_dir", site);
-  },
-  // Commit status on the PR head (context site-preview): informational, not a required check.
-  async status() {
-    const gh = github(env("GH_TOKEN"));
-    const sha = env("SHA");
-    if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("SHA must be a full commit SHA");
-    const state = env("STATE");
-    if (!["success", "failure", "error", "pending"].includes(state)) throw new Error("invalid STATE");
-    const url = process.env.TARGET_URL;
-    if (url && !/^https:\/\/[a-z0-9.-]+\//.test(url)) throw new Error("invalid TARGET_URL");
-    await gh.send("POST", `/repos/${env("REPO")}/statuses/${sha}`, {
-      state,
-      context: "site-preview",
-      description: (process.env.DESCRIPTION ?? "").slice(0, 140),
-      ...(url ? { target_url: url } : {}),
-    });
-    console.log(`status site-preview=${state} on ${sha.slice(0, 7)}`);
-  },
-  // Wait (bounded) until every required check run of SHA is green; fail closed on a failure or a
-  // timeout. The list lives in src/gate.ts.
-  async gate() {
-    const gh = github(env("GH_TOKEN"));
-    const repo = env("REPO");
-    const sha = env("SHA");
-    if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("SHA must be a full commit SHA");
-    const timeoutMs = Number(process.env.GATE_TIMEOUT_S ?? 2400) * 1000;
-    const intervalMs = Number(process.env.GATE_INTERVAL_S ?? 20) * 1000;
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const runs = await gh.list<CheckRun>(`/repos/${repo}/commits/${sha}/check-runs?per_page=100`, "check_runs");
-      const result = evaluateChecks(runs);
-      if (result.state === "pass") {
-        console.log(`all required checks green for ${sha.slice(0, 7)}: ${result.passed.join(", ")}`);
-        summary(`### Deploy gate: passed for \`${sha.slice(0, 7)}\` (${result.passed.join(", ")})`);
-        return;
-      }
-      if (result.state === "fail") {
-        summary(`### Deploy gate: FAILED for \`${sha.slice(0, 7)}\`: ${result.failed.join(", ")}`);
-        throw new Error(`required checks failed for ${sha.slice(0, 7)}: ${result.failed.join(", ")}`);
-      }
-      if (Date.now() >= deadline) {
-        const waiting = [...result.pending, ...result.missing.map((m) => `${m} (missing)`)];
-        summary(`### Deploy gate: TIMED OUT for \`${sha.slice(0, 7)}\`: ${waiting.join(", ")}`);
-        throw new Error(`required checks not green after ${timeoutMs / 1000}s: ${waiting.join(", ")}`);
-      }
-      console.log(`waiting for ${[...result.pending, ...result.missing].join(", ")}`);
-      await new Promise((r) => setTimeout(r, intervalMs));
-    }
-  },
-  // Just before a preview deploy: is the PR still open, not a draft, and is BUILT_SHA its head?
-  async "pr-decision"() {
-    const gh = github(env("GH_TOKEN"));
-    const pr = await gh.get<PullRequestState>(`/repos/${env("REPO")}/pulls/${previewStage(env("PR_NUMBER")).slice(3)}`);
-    const decision = previewDecision(pr, env("BUILT_SHA"));
-    output("deploy", String(decision.deploy));
-    if (!decision.deploy) {
-      output("reason", decision.reason);
-      console.log(`::notice::not deploying the preview: ${decision.reason}`);
-    }
-  },
-  // Just before a teardown: idempotent and race-safe. A PR that is open and ready again (reopened
-  // or marked ready meanwhile) keeps its preview; its own run redeploys it.
-  async "teardown-decision"() {
-    const gh = github(env("GH_TOKEN"));
-    const pr = await gh.get<PullRequestState>(`/repos/${env("REPO")}/pulls/${previewStage(env("PR_NUMBER")).slice(3)}`);
-    const destroy = pr.state !== "open" || pr.draft || process.env.FORCE === "true";
-    output("destroy", String(destroy));
-    if (!destroy) console.log("::notice::PR is open and ready again: keeping the preview");
-  },
-  // Exactly one comment per PR, found by its hidden marker, created or updated in place.
-  async comment() {
-    const plan = commentPlan({
-      deployResult: process.env.DEPLOY_RESULT ?? "",
-      deployStatus: process.env.DEPLOY_STATUS ?? "",
-      teardownResult: process.env.TEARDOWN_RESULT ?? "",
-    });
-    if (!plan) {
-      console.log("nothing to report on the PR");
-      return;
-    }
-    const gh = github(env("GH_TOKEN"));
-    const repo = env("REPO");
-    const number = previewStage(env("PR_NUMBER")).slice(3);
-    // Deploys report the built commit; teardowns (incl. manual ones) the PR's current head. Re-read
-    // the PR right before commenting: a deploy result for a commit that is no longer the head is
-    // not posted (the newer run reports), so the comment never goes backwards.
-    const current = await gh.get<PullRequestState>(`/repos/${repo}/pulls/${number}`);
-    if (process.env.SHA && (plan.status === "deployed" || plan.status === "failed") && current.head.sha !== process.env.SHA) {
-      console.log(`PR head moved to ${current.head.sha.slice(0, 7)}: not commenting for ${process.env.SHA.slice(0, 7)}`);
-      return;
-    }
-    const sha = process.env.SHA || current.head.sha;
-    const body = renderComment({
-      status: plan.status,
-      sha,
-      runUrl: env("RUN_URL"),
-      ...(process.env.URL ? { url: process.env.URL } : {}),
-      ...(process.env.REASON ? { reason: process.env.REASON } : {}),
-      target: process.env.TARGET === "staging" ? "staging" : "preview",
-    });
-    const existing = findPreviewComment(await gh.list<IssueComment>(`/repos/${repo}/issues/${number}/comments?per_page=100`));
-    if (existing) {
-      await gh.send("PATCH", `/repos/${repo}/issues/comments/${existing.id}`, { body });
-      console.log(`updated comment ${existing.id} (${plan.status})`);
-    } else if (plan.createIfMissing) {
-      const created = await gh.send<{ id: number }>("POST", `/repos/${repo}/issues/${number}/comments`, { body });
-      console.log(`created comment ${created.id} (${plan.status})`);
-    } else {
-      console.log("no preview comment on this PR (it never had a preview): nothing to update");
-    }
-  },
-  // Weekly orphan sweeper: destroy pr-<n> stages whose PR is closed, a draft, or gone. Runs with the
-  // preview environment's Cloudflare credentials, from main's checkout of infra/site.
-  async sweep() {
-    const gh = github(env("GH_TOKEN"));
-    const repo = env("REPO");
-    const alchemy = (args: string[]) =>
-      execFileSync("pnpm", ["--filter", "@open-upload/site-infra", "exec", "alchemy", ...args], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "inherit"],
-        maxBuffer: 16 * 1024 * 1024,
-      });
-    const stages = parsePreviewStages(alchemy(["state", "list", WORKER_BASE_NAME]));
-    console.log(`preview stages in state: ${stages.map((n) => `pr-${n}`).join(", ") || "none"}`);
-    const readPr = async (n: number) => {
-      try {
-        return await gh.get<PullRequestState>(`/repos/${repo}/pulls/${n}`);
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 404) return undefined;
-        throw error;
-      }
-    };
-    const destroyed: string[] = [];
-    for (const n of stages) {
-      if (!isOrphan(await readPr(n))) continue;
-      if (!isOrphan(await readPr(n))) continue; // re-read right before destroying (reopened meanwhile?)
-      alchemy(["destroy", "--stage", `pr-${n}`, "--yes", "--no-input"]);
-      destroyed.push(`pr-${n}`);
-    }
-    summary(`### Preview sweep: ${destroyed.length ? `destroyed ${destroyed.join(", ")}` : "no orphan"} (of ${stages.length} preview stages)`);
-  },
-  // site-build: the artifact's manifest. Informational for the deploy workflow, which recomputes
-  // every value and refuses a mismatch (src/deploy-plan.ts checkManifest).
-  manifest() {
-    const pr = process.env.PR_NUMBER ? Number(previewStage(process.env.PR_NUMBER).slice(3)) : null;
-    const sha = env("SHA");
-    if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("SHA must be a full commit SHA");
-    const manifest = { sha, pr, stage: env("STAGE"), event: env("EVENT"), action: process.env.ACTION || null };
-    stageKind(manifest.stage);
-    writeFileSync(env("OUT"), `${JSON.stringify(manifest, null, 2)}\n`);
-    console.log(JSON.stringify(manifest));
-  },
-  "check-site"() {
-    const report = checkSiteDir(env("SITE_DIST_DIR"));
-    for (const warning of report.warnings) console.log(`::warning::${warning}`);
-    console.log(`site ok: ${report.files} files, ${(report.bytes / 1024 / 1024).toFixed(1)} MiB${report.server ? `; Worker: ${report.server.modules} modules, ${(report.server.gzipBytes / 1024).toFixed(0)} KiB gzip (limit 3072)` : "; assets only"}`);
-  },
-  headers() {
-    const stage = env("STAGE");
-    stageKind(stage);
-    const revision = process.env.REVISION ? assertRevision(process.env.REVISION) : undefined;
-    process.stdout.write(renderHeadersFile({ indexable: isIndexable(stage), ...(revision ? { revision } : {}) }));
-  },
-  async smoke() {
-    const stage = env("STAGE");
-    const url = env("SMOKE_URL");
-    const result = await runSmoke({
-      url,
-      distDir: env("SITE_DIST_DIR"),
-      indexable: isIndexable(stage),
-      ...(process.env.REVISION ? { revision: assertRevision(process.env.REVISION) } : {}),
-      timeoutMs: Number(process.env.SMOKE_TIMEOUT_MS ?? 180_000),
-      log: (line) => console.log(line),
-    });
-    for (const check of result.checks) console.log(`ok  ${check}`);
-    for (const warning of result.warnings) console.log(`::warning::${warning}`);
-    for (const failure of result.failures) console.log(`::error::${failure}`);
-    summary(
-      [
-        `### Smoke test (${stage}): ${result.ok ? "passed" : "FAILED"}`,
-        "",
-        `URL: ${url}`,
-        "",
-        ...result.checks.map((c) => `- ✅ ${c}`),
-        ...result.warnings.map((w) => `- ⚠️ ${w}`),
-        ...result.failures.map((f) => `- ❌ ${f}`),
-      ].join("\n"),
-    );
-    if (!result.ok) process.exitCode = 1;
+    console.log(`preflight ok: ${stage} (mode ${mode}), account token ${verified.status}, ${store} v${probe.version}, ${environment}: reviewers ${reviewers}, default-branch-only ${protection.mainOnly}`);
   },
 };
 
 const name = process.argv[2] ?? "";
 const command = commands[name];
 if (!command) {
-  console.error(`usage: cli.ts <${Object.keys(commands).join("|")}>`);
+  console.error(`usage: cli.ts <${Object.keys(commands).join(" | ")}>`);
   process.exit(2);
 }
-try {
-  await command();
-} catch (error) {
+command().catch((error: unknown) => {
   console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
-}
+});

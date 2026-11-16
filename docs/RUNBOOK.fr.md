@@ -123,52 +123,52 @@ node infra/site/scripts/bootstrap.ts --account-id <id> --token-file <fichier> --
 ```
 
 Le script vérifie le token et crée les deux stockages d'état (prod et previews), dont il écrit les jetons dans le
-dossier privé. Il crée aussi les Workers `better-upload-site` et `better-upload-site-staging` avec une page
-provisoire, uniquement s'ils n'existent pas. Il affiche enfin les commandes restantes.
+dossier privé. Il crée aussi le Worker de prod `better-upload-site` avec une page provisoire, uniquement s'il
+n'existe pas.
 
-Ensuite :
-1. Crée les tokens CI indiqués par le script ([docs/SITE-DEPLOY.md §3](SITE-DEPLOY.md)) :
-   - `github-site-production` : Editor sur `better-upload-site` ;
-   - `github-site-preview-dynamic` : Workers Admin sur tout le compte, pour une preview par PR (choix par défaut du
-     standard commun).
-     - **Risque :** ce token peut toucher tous les Workers du compte, y compris ceux de WebMCP.
-     - **Ce qui le limite :** il n'est lisible que depuis `main`.
-   - Pour éviter ce risque, choisis une preview unique partagée : crée `github-site-staging` (Editor sur
-     `better-upload-site-staging`) et mets `SITE_PREVIEW_MODE=staging`.
-2. **Supprime `site-bootstrap-temp`.**
+Ensuite, crée les deux tokens CI ([docs/SITE-DEPLOY.md §3](SITE-DEPLOY.md)) :
+- **production** : Editor sur le seul Worker `better-upload-site` ;
+- **preview** : Workers edit sur tout le compte, pour une preview par PR.
+  - **Risque :** ce token peut toucher tous les Workers du compte, y compris ceux de WebMCP.
+  - **Ce qui le limite :** il n'est lisible que depuis `main`.
+  - **Pour éviter ce risque :** `--preview-mode staging`, avec un token limité à `better-upload-site-staging`.
 
 > Si la commande échoue : **redonne-moi la main** avec la sortie complète. C'est la partie qui n'a jamais tourné sur un
 > vrai compte.
 
 ---
 
-## Étape 6 — Déploiement continu du site (toi, 10 min)
+## Étape 6 — Réglages GitHub et déploiement continu (toi, 10 min)
 
-Crée les environnements `site-production` et `site-preview` : *Deployment branches and tags* → *Selected branches* →
-`main` uniquement. Tu peux ajouter un reviewer sur `site-preview` (voir [SITE-DEPLOY.md §5](SITE-DEPLOY.md) ; je
-recommande sans).
+D'abord **à blanc** : le script affiche chaque appel, jamais une valeur secrète.
 
 ```bash
-D=~/site-bootstrap-secrets
-gh secret set CLOUDFLARE_API_TOKEN --env site-production < <fichier du token github-site-production>
-gh secret set SITE_STATE_TOKEN     --env site-production < $D/better-upload-site-state.token
-gh secret set CLOUDFLARE_API_TOKEN --env site-preview    < <fichier du token github-site-preview-dynamic>
-gh secret set SITE_STATE_TOKEN     --env site-preview    < $D/better-upload-site-preview-state.token
-printf %s <account id> | gh secret set CLOUDFLARE_ACCOUNT_ID --env site-production
-printf %s <account id> | gh secret set CLOUDFLARE_ACCOUNT_ID --env site-preview
-gh variable set SITE_WORKERS_SUBDOMAIN --body <sous-domaine>
-gh variable set SITE_PREVIEW_MODE --body dynamic     # ou staging
-gh variable set SITE_DEPLOY_ENABLED --body true
-rm -rf "$D" <fichiers de token>
+node tooling/setup-github.mjs --repo PaulSenon/better-upload --reviewer <ton login GitHub> \
+  --account-id <id> --subdomain <sous-domaine> \
+  --prod-token-file <token prod> --preview-token-file <token preview> --state-dir ~/site-bootstrap-secrets \
+  --preview-mode dynamic
 ```
 
-Protège `main` avec un ruleset qui exige les checks : `check`, `integration`, `convex`, `e2e (chromium)`,
-`e2e (firefox)`, `e2e (webkit)`, `e2e (mobile-safari)`, `workflow-lint`, `site-build`.
+Relis la sortie, puis relance la même commande avec `--apply`. Elle crée :
+- les environnements `site-preview` et `site-production`, limités à `main` et sans reviewer ;
+- `npm-release` (sans reviewer : ta 2FA npm fait office de verrou) ;
+- `release-finalize` (reviewer : toi) ;
+- les secrets et variables du site ;
+- le ruleset `delivery-kit`, qui exige une PR et les checks.
+
+Ensuite :
+
+```bash
+gh variable set SITE_DEPLOY_ENABLED --body true
+rm -rf ~/site-bootstrap-secrets <fichiers de token>
+```
+
+Supprime enfin le token temporaire dans Cloudflare.
 
 **Comment ça marche :**
 - **Push sur `main`** : la prod est mise à jour, après tous les checks verts sur ce commit.
-- **PR prête (pas en brouillon)** : la preview est déployée quand tous les checks de son dernier commit sont verts, et
-  son URL est dans un commentaire unique, mis à jour à chaque push.
+- **PR prête (pas en brouillon)** : la preview est déployée quand tous les checks de son dernier commit sont verts. Son
+  URL apparaît dans un commentaire unique, mis à jour à chaque push, et dans le statut `site-preview`.
 - **Fermeture, merge ou retour en brouillon** : la preview est retirée. Un nettoyage hebdomadaire rattrape les oublis.
 
 **Vérification :** ouvre une petite PR. Le workflow `site-deploy` passe vert, le commentaire affiche l'URL, et l'URL
@@ -189,8 +189,8 @@ Les commandes d'installation du registry affichées dans la doc utilisent automa
 
 ## Étape 8 — Tests sur les vrais fournisseurs (optionnel, 15 min)
 
-La CI teste les PR contre MinIO. Les tests sur R2 et AWS ne tournent que sur `main` : chaque push, chaque mardi, ou à la
-main. Leurs clés sont dans l'environnement `cloud-tests`, limité à `main`, donc aucune PR ne peut les lire.
+La CI teste les PR contre MinIO. Les tests sur R2 et AWS tournent dans le workflow `cloud-tests`, chaque mardi ou à la main, jamais
+depuis une PR. Leurs clés sont dans l'environnement `cloud-tests`, limité à `main`, donc aucune PR ne peut les lire.
 
 1. Crée un bucket **dédié aux tests** chez chaque fournisseur :
    - **R2** : bucket `open-upload-ci`, token *Object Read & Write* limité à ce bucket.
@@ -209,7 +209,7 @@ main. Leurs clés sont dans l'environnement `cloud-tests`, limité à `main`, do
    gh variable set AWS_REGION --body eu-west-3
    gh variable set AWS_BUCKET --body open-upload-ci-<suffixe>
    gh variable set CLOUD_TESTS_ENABLED --body true
-   gh workflow run CI --ref main
+   gh workflow run cloud-tests --ref main
    ```
 
 **Vérification :** le job `cloud-tests` est vert, et le tableau de conformité de chaque fournisseur apparaît

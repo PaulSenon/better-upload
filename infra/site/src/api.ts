@@ -1,4 +1,5 @@
-// Minimal REST clients for GitHub and Cloudflare (fetch only, no dependency). Tokens are passed in,
+// Minimal REST clients for GitHub and Cloudflare (fetch only, no dependency). Copied from
+// webmcp-sdk infra/docs/src/api.ts (+ DELETE). Tokens are passed in,
 // never logged; every error message goes through `redact` so a token cannot leak through an echo
 // of a request or a response.
 
@@ -32,7 +33,7 @@ export function github(token: string, { fetch: f = fetch, api = "https://api.git
     authorization: `Bearer ${token}`,
     accept: "application/vnd.github+json",
     "x-github-api-version": "2022-11-28",
-    "user-agent": "open-upload-site-infra",
+    "user-agent": "monorepo-delivery-kit",
   };
   const call = async (method: string, url: string, body?: unknown) => {
     const res = await f(url, { method, headers: { ...headers, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -75,7 +76,7 @@ export interface CloudflareEnvelope<T> {
 
 export interface CloudflareClient {
   /** Resolves the envelope, including unsuccessful ones; throws only on transport errors. */
-  request<T>(method: "GET" | "PUT", path: string, body?: unknown): Promise<{ status: number; body: CloudflareEnvelope<T> | undefined }>;
+  request<T>(method: "GET" | "PUT" | "DELETE", path: string, body?: unknown): Promise<{ status: number; body: CloudflareEnvelope<T> | undefined }>;
 }
 
 export function cloudflare(token: string, { fetch: f = fetch, api = "https://api.cloudflare.com/client/v4" } = {}): CloudflareClient {

@@ -16,13 +16,13 @@ On every PR and push to `main`, with no secret (`permissions: {}` by default, re
 | `convex` | Convex component against an anonymous local backend + MinIO |
 | `e2e (chromium\|firefox\|webkit\|mobile-safari)` | Playwright with the fault-injecting S3 proxy |
 | `workflow-lint` | zizmor (pedantic) + actionlint |
+| `dependency-review` | PR only: new vulnerable runtime dependencies (delivery kit) |
 | `site-build` (`site.yml`) | Credential-free Workers build of `apps/web`, output checks, local workerd smoke test, artifact |
 
 These names are the required checks of the branch ruleset and of the site deploy gate (`infra/site/src/gate.ts`).
 
-`cloud-tests` (real R2 / AWS) runs only on `main` (push, Tuesdays, dispatch) when
-`CLOUD_TESTS_ENABLED=true`. Its keys live in the `cloud-tests` environment, restricted to `main`, so PR
-code never sees them. Use a dedicated test bucket with the CORS and lifecycle rule from `recommendedBucketConfig()`.
+`cloud-tests.yml` (real R2 / AWS) runs on main only, on Tuesdays and on dispatch, when `CLOUD_TESTS_ENABLED=true`.
+It is never triggered by a PR or a push. Its keys live in the `cloud-tests` environment, restricted to `main`. Use a dedicated test bucket with the CORS and lifecycle rule from `recommendedBucketConfig()`.
 
 ## npm releases (`release.yml`, `version-pr.yml`): off until `NPM_RELEASE_ENABLED=true`
 
@@ -32,7 +32,7 @@ Runbook and bootstrap: [RELEASING.md](./RELEASING.md).
 
 ## Docs + registry site (`site.yml`, `site-deploy.yml`): off until `SITE_DEPLOY_ENABLED=true`
 
-Unprivileged build, main-defined deploy of the prebuilt Worker, previews per non-draft PR after every required check
+Delivery kit (`.delivery-kit-version`, `delivery.config.json`). Unprivileged build, main-defined deploy of the prebuilt Worker, previews per non-draft PR after every required check
 of the exact commit is green, stable PR comment, teardown on close/merge/draft, weekly orphan sweep, production from
 `main`, rollback by run id. Settings, tokens, bootstrap, residual risk: [SITE-DEPLOY.md](./SITE-DEPLOY.md).
 

@@ -17,7 +17,7 @@
       "!**/*.mdx",
       "!apps/web/src/styles/app.css",
       "!infra/site",
-      "!tooling/release"
+      "!tooling"
     ]
   },
   "css": { "parser": { "tailwindDirectives": true } },

@@ -1,124 +1,114 @@
-// Preview lifecycle decisions (pure): deploy or not, the PR comment, and the orphan sweeper.
+// Preview re-checks, comment and orphan sweep (pure). The plan is deploy-plan.ts.
+// Adapted from webmcp-sdk infra/docs/src/preview.ts.
 
-import { STATE_STORES, WORKER_BASE_NAME } from "./stage.ts";
+import { BOTS } from "./deploy-plan.ts";
+import { previewNumberFromWorker } from "./stage.ts";
 
-export interface PullRequestState {
+const SHA = /^[0-9a-f]{40}$/;
+
+export interface PullRequest {
   number: number;
   state: string; // open | closed
   draft: boolean;
-  head: { sha: string };
+  head: { sha: string; repo: { full_name: string } | null };
+  base: { ref: string };
+  user?: { login?: string } | null;
 }
 
-export type PreviewDecision =
-  | { deploy: true }
-  | { deploy: false; reason: "closed" | "draft" | "superseded" };
+export type PreviewAction =
+  | { action: "deploy" }
+  | { action: "teardown"; reason: "closed" | "draft" }
+  | { action: "skip"; reason: string };
 
 /**
- * Read just before deploying. A preview deploys only for an open, non-draft PR whose head is still
- * the commit this run built: a newer push has its own run, a closed or draft PR is torn down.
+ * Re-check (before deploying and before commenting), from the PR as the API returns it NOW.
+ * The plan itself is deploy-plan.ts; this only answers "still deploy this SHA?".
  */
-export function previewDecision(pr: PullRequestState, builtSha: string): PreviewDecision {
-  if (pr.state !== "open") return { deploy: false, reason: "closed" };
-  if (pr.draft) return { deploy: false, reason: "draft" };
-  if (pr.head.sha !== builtSha) return { deploy: false, reason: "superseded" };
-  return { deploy: true };
+export function previewAction(pr: PullRequest, sha: string, ciConclusion: string | null, ctx: { repo: string; botPreviews?: boolean }): PreviewAction {
+  if (pr.head.repo?.full_name !== ctx.repo) return { action: "skip", reason: "fork" };
+  if (pr.user?.login && BOTS.has(pr.user.login) && !ctx.botPreviews) return { action: "skip", reason: "bot" };
+  if (pr.state !== "open") return { action: "teardown", reason: "closed" };
+  if (pr.draft) return { action: "teardown", reason: "draft" };
+  if (pr.head.sha !== sha) return { action: "skip", reason: "superseded" };
+  if (ciConclusion !== "success") return { action: "skip", reason: `CI concluded ${ciConclusion ?? "without conclusion"}` };
+  return { action: "deploy" };
+}
+
+/**
+ * After a deploy, the PR may have been closed or drafted while it ran: destroy what was just
+ * deployed (its teardown run is queued behind this one in the same concurrency group anyway).
+ * Superseded is fine: the newer commit's run is queued behind this one and overwrites it.
+ */
+export function afterDeploy(pr: PullRequest | undefined): "keep" | "destroy" {
+  return pr === undefined || pr.state !== "open" || pr.draft ? "destroy" : "keep";
+}
+
+/** A preview Worker is an orphan when its PR is closed, a draft, from a fork, or gone (404). */
+export function isOrphan(pr: PullRequest | undefined, repo: string): boolean {
+  return pr === undefined || pr.state !== "open" || pr.draft || pr.head.repo?.full_name !== repo;
+}
+
+/**
+ * PR numbers from `alchemy state list <stack>` output (one path per line: `<stack>/pr-12/` or
+ * `pr-12/`). From webmcp-sdk parsePreviewStages: the sweep unions this with the Worker list, so
+ * a stage with state but no Worker (failed deploy) and a Worker without state are both found.
+ */
+export function previewNumbersFromState(listing: string, stack: string): number[] {
+  const out = new Set<number>();
+  for (const raw of listing.split("\n")) {
+    const parts = raw.trim().replace(/\/+$/, "").split("/").filter(Boolean);
+    if (parts[0] === stack) parts.shift();
+    const m = parts.length === 1 ? /^pr-([1-9][0-9]{0,6})$/.exec(parts[0]!) : null;
+    if (m?.[1]) out.add(Number(m[1]));
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+export function previewNumbers(base: string, workerNames: readonly string[]): number[] {
+  const out = new Set<number>();
+  for (const name of workerNames) {
+    const n = previewNumberFromWorker(base, name);
+    if (n !== undefined) out.add(n);
+  }
+  return [...out].sort((a, b) => a - b);
 }
 
 // --- PR comment ---------------------------------------------------------------------------------
 
-export const COMMENT_MARKER = "<!-- better-upload-site-preview -->";
+export const commentMarker = (project: string) => `<!-- delivery-kit:${project}:preview -->`;
 const BOT_LOGIN = "github-actions[bot]";
 
 export interface IssueComment {
   id: number;
   body?: string | null;
-  user?: { login?: string; type?: string } | null;
+  user?: { login?: string } | null;
 }
 
-/** The workflow's own comment: has the marker and was written by github-actions[bot]. */
-export function findPreviewComment(comments: readonly IssueComment[]): IssueComment | undefined {
-  return comments.find((c) => c.user?.login === BOT_LOGIN && c.body?.includes(COMMENT_MARKER));
+/** The one comment this workflow owns on a PR (edited in place: stable URL, no comment spam). */
+export function findComment(comments: readonly IssueComment[], project: string): IssueComment | undefined {
+  return comments.find((c) => c.user?.login === BOT_LOGIN && c.body?.includes(commentMarker(project)));
 }
 
 export type CommentStatus = "deployed" | "failed" | "removed" | "removal-failed";
 
-export interface CommentInput {
-  status: CommentStatus;
-  sha: string;
-  runUrl: string;
-  url?: string;
-  reason?: string; // closed | draft | manual | sweeper
-  /** staging: the shared staging Worker (last PR deployed wins); preview: this PR's own Worker. */
-  target?: "staging" | "preview";
-}
-
-const SHA = /^[0-9a-f]{40}$/;
-const RUN_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+$/;
-const PREVIEW_URL = /^https:\/\/better-upload-site-(staging|pr-[1-9][0-9]{0,6})\.[a-z0-9-]+\.workers\.dev\/$/;
-
-export function renderComment(input: CommentInput): string {
-  if (!SHA.test(input.sha)) throw new Error("invalid commit SHA");
-  if (!RUN_URL.test(input.runUrl)) throw new Error("invalid run URL");
-  if (input.url !== undefined && !PREVIEW_URL.test(input.url)) throw new Error("invalid preview URL");
-  const short = input.sha.slice(0, 7);
+export function renderComment(input: { project: string; status: CommentStatus; sha?: string; url?: string; runUrl: string; reason?: string }): string {
+  if (input.sha !== undefined && !SHA.test(input.sha)) throw new Error("invalid commit SHA");
+  if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+$/.test(input.runUrl)) throw new Error("invalid run URL");
+  if (input.url !== undefined && !/^https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev\/$/.test(input.url)) throw new Error("invalid preview URL");
+  const short = input.sha ? `\`${input.sha.slice(0, 7)}\`` : "(unknown commit)";
   const run = `[run](${input.runUrl})`;
-  const why = input.reason === "draft" ? "the PR is a draft" : input.reason === "closed" ? "the PR is closed" : input.reason === "sweeper" ? "orphan cleanup" : "manual teardown";
-  const staging = input.target === "staging";
+  const why = { closed: "PR closed", draft: "PR converted to draft", sweep: "orphan cleanup", manual: "manual teardown" }[input.reason ?? "manual"] ?? "teardown";
   const line = {
-    deployed: staging
-      ? `✅ **Staging now serves this PR** at commit \`${short}\`: ${input.url ?? "(no URL)"} — ${run}\n\nStaging is shared: the next PR deployed there replaces this one. The \`X-Site-Revision\` response header shows what it currently serves.`
-      : `✅ **Site preview deployed:** ${input.url ?? "(no URL)"} — commit \`${short}\` — ${run}`,
-    failed: `❌ **Site ${staging ? "staging" : "preview"} deploy failed** for commit \`${short}\` — ${run}`,
-    removed: `🧹 **Site preview removed** (${why}) — last commit \`${short}\` — ${run}`,
-    "removal-failed": `⚠️ **Site preview teardown failed** (${why}) — commit \`${short}\` — ${run}. Retry: Actions → site-deploy → Run workflow, \`destroy_preview\` = this PR number.`,
+    deployed: `✅ **Preview:** ${input.url} — commit ${short} — ${run}`,
+    failed: `❌ **Preview deploy failed** for commit ${short} — ${run}. The previous preview, if any, is unchanged.`,
+    removed: `🧹 **Preview removed** (${why}) — ${run}`,
+    "removal-failed": `⚠️ **Preview teardown failed** (${why}) — ${run}. The weekly sweep retries; or run the deploy workflow manually with \`destroy_pr\`.`,
   }[input.status];
   return [
-    COMMENT_MARKER,
+    commentMarker(input.project),
     line,
     "",
-    staging
-      ? "<sub>Deployed to staging only for open, non-draft PRs from this repository once every required check of the commit is green, with the infra of main. Staging is never torn down; it is reused by the next PR.</sub>"
-      : "<sub>Deployed only for open, non-draft PRs from this repository once every required check of the commit is green, with the infra of main. Removed when the PR is closed or converted to draft.</sub>",
+    "<sub>Same-repository, non-draft PRs only, after every required check of the exact commit is green. Deployed by the default branch's workflow from the CI artifact; removed on close, merge or draft.</sub>",
     "",
   ].join("\n");
-}
-
-/**
- * What the comment job does after the preview jobs. Deploy results create the comment if missing;
- * teardown results only update an existing one (a PR that never had a preview gets no comment).
- */
-export function commentPlan(input: {
-  deployResult: string; // success | failure | skipped | cancelled | ""
-  deployStatus: string; // deployed | skipped | "" (output of the deploy job)
-  teardownResult: string;
-}): { status: CommentStatus; createIfMissing: boolean } | undefined {
-  if (input.teardownResult === "success") return { status: "removed", createIfMissing: false };
-  if (input.teardownResult === "failure") return { status: "removal-failed", createIfMissing: false };
-  if (input.deployResult === "failure") return { status: "failed", createIfMissing: true };
-  if (input.deployResult === "success" && input.deployStatus === "deployed") return { status: "deployed", createIfMissing: true };
-  return undefined;
-}
-
-// --- orphan sweeper -----------------------------------------------------------------------------
-
-/**
- * Stages from `alchemy state list better-upload-site` output (one path per line, such as
- * `better-upload-site/pr-12/` or `pr-12/`). Only well-formed `pr-<n>` stages are returned.
- */
-export function parsePreviewStages(listing: string, stack = WORKER_BASE_NAME): number[] {
-  const numbers = new Set<number>();
-  for (const raw of listing.split("\n")) {
-    const parts = raw.trim().replace(/\/+$/, "").split("/").filter(Boolean);
-    if (parts[0] === stack) parts.shift();
-    const stage = parts[0];
-    if (parts.length !== 1 || !stage || Object.values<string>(STATE_STORES).includes(stage)) continue;
-    const m = /^pr-([1-9][0-9]{0,6})$/.exec(stage);
-    if (m?.[1]) numbers.add(Number(m[1]));
-  }
-  return [...numbers].sort((a, b) => a - b);
-}
-
-/** A preview is an orphan when its PR is closed, a draft, or gone (404). */
-export function isOrphan(pr: PullRequestState | undefined): boolean {
-  return pr === undefined || pr.state !== "open" || pr.draft;
 }

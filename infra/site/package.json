@@ -2,17 +2,13 @@
   "name": "@open-upload/site-infra",
   "version": "0.0.0",
   "private": true,
-  "description": "Infrastructure as code (Alchemy v2) for the docs + registry site on Cloudflare Workers. Deploys the prebuilt apps/web output. Not published.",
-  "license": "MIT",
+  "description": "Site infrastructure (Alchemy v2) from the Monorepo Delivery Kit. Not published.",
   "type": "module",
-  "engines": {
-    "node": ">=24.11.1"
-  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test 'test/*.test.ts'",
-    "check:local": "node scripts/local-check.ts",
-    "dev": "DO_NOT_TRACK=1 alchemy dev"
+    "check": "pnpm typecheck && pnpm test",
+    "check:local": "node scripts/local-check.ts"
   },
   "devDependencies": {
     "@alchemy.run/cloudflare": "2.0.0-beta.85",
