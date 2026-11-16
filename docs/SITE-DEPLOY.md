@@ -147,7 +147,7 @@ Actions → `site-deploy` → *Run workflow*, with one of these inputs:
 | `ci.yml` | project-owned: `check`, `integration`, `convex`, the 4 `e2e`, `workflow-lint`, plus the kit's `dependency-review` | contract: ci.yml belongs to the project |
 | `cloud-tests.yml` | R2/AWS tests, schedule + dispatch, `cloud-tests` environment | no secret in PR- or push-triggered workflows (W4) |
 | `infra/site/src/stage.ts` | CSP (`worker-src blob:` for the demo's hashing workers), HSTS, X-Frame-Options, Permissions-Policy, COOP, immutable `/assets/*` | the kit's `_headers` has only nosniff and Referrer-Policy |
-| `apps/web/scripts/build-worker.ts` | removes the `browser` resolve condition from server environments | fumadocs' `./server` resolves to a browser stub (`/api/search` 500); kit recipe v0.1.2 |
+| `apps/web/scripts/build-worker.ts` | removes the `browser` resolve condition from server environments | fumadocs' `./server` resolves to a browser stub (`/api/search` 500); kit recipe in v0.1.2 |
 | `site-deploy.yml` | `deploy-production`: `steps.fresh` instead of `steps.before` | kit bug: production never deployed on a push (actionlint) |
 | `site-deploy.yml` | concurrency on `deploy-comment` | zizmor pedantic `concurrency-limits` |
 | `infra/site/scripts/local-check.ts`, `package.json` | default artifact from `delivery.config.json`; `check:local` runs the real SSR artifact only | the kit hardcodes `apps/site/out` and its `--ssr-fixture` reuses the project's entry/smoke paths |
@@ -156,7 +156,7 @@ Actions → `site-deploy` → *Run workflow*, with one of these inputs:
 
 ## 8. Tested vs not tested
 
-**Tested locally (2026-11-16, kit v0.1.2, no credentials):**
+**Tested locally (2026-11-16, kit v0.1.1 (4b0d162), no credentials):**
 - `pnpm site:build` with a preview `SITE_URL`;
 - `check-artifact` (180 files, server about 977 KiB gzip);
 - `check:local`: the real artifact in workerd, with every smoke path 2xx including `/api/search`, `noindex`, and
