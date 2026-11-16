@@ -2,8 +2,8 @@
 # credentials never persisted. The job names below are the check-run names the site deploy gate
 # requires (infra/site/src/gate.ts): rename them together.
 #
-# Real providers (R2, AWS) are NOT tested on PRs: their keys live in the `integration-providers`
-# environment, which only releases secrets to runs on main (see integration-providers below).
+# Real providers (R2, AWS) are NOT tested on PRs: their keys live in the `cloud-tests`
+# environment, which only releases secrets to runs on main (see cloud-tests below).
 name: CI
 
 on:
@@ -31,6 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # the change-note rule needs the merge base with the PR's base branch
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -46,7 +47,7 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch --no-tags --depth=200 origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
           node tooling/release/check-changeset.mjs "origin/$BASE_REF"
 
   integration:
@@ -70,12 +71,12 @@ jobs:
 
   # Real R2 / AWS buckets, from main only. The environment's deployment branch policy is `main`,
   # so a PR (even one editing this file) cannot obtain these keys. Keys: scoped to one test bucket.
-  integration-providers:
-    name: integration-providers
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PROVIDER_TESTS_ENABLED == 'true'
+  cloud-tests:
+    name: cloud-tests
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.CLOUD_TESTS_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: integration-providers # branch policy: main only
+    environment: cloud-tests # branch policy: main only
     permissions:
       contents: read
     steps:

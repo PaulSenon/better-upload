@@ -17,6 +17,9 @@ import { createBuilder } from 'vite';
 
 export const COMPATIBILITY_DATE = '2026-11-01';
 
+// The stage URL from CI ends with "/": the install commands append "/r/<item>.json".
+if (process.env.VITE_SITE_URL) process.env.VITE_SITE_URL = process.env.VITE_SITE_URL.replace(/\/+$/, '');
+
 // Tells Alchemy's plugin it is the injected one (and disables a second Cloudflare plugin from the config).
 process.env.ALCHEMY_CLOUDFLARE_VITE_INJECTED = '1';
 const root = fileURLToPath(new URL('..', import.meta.url));

@@ -309,6 +309,7 @@ test("bootstrap: reads a store's cached bearer token, and names the real Workers
   const report = permissionReport("acme");
   assert.match(report, /github-site-production {3}Workers · Specified Workers: better-upload-site · Editor/);
   assert.match(report, /github-site-staging {6}Workers · Specified Workers: better-upload-site-staging · Editor/);
+  assert.match(report, /github-site-preview-dynamic  Workers · All Workers · Admin/);
   assert.match(report, /no Secrets Store, no zone/);
   assert.match(report, /SITE_STATE_TOKEN {6}--env site-preview {4}< <out-dir>\/better-upload-site-preview-state\.token/);
 });

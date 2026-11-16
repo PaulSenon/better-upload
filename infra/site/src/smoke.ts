@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { IMMUTABLE_CACHE_CONTROL, securityHeaders } from "./headers.ts";
+import { IMMUTABLE_CACHE_CONTROL, REGISTRY_CACHE_CONTROL, securityHeaders } from "./headers.ts";
 
 export interface SmokeOptions {
   /** Origin to test, e.g. https://better-upload-site.example.workers.dev/ */
@@ -123,7 +123,9 @@ export async function runSmoke(options: SmokeOptions): Promise<SmokeResult> {
     if (res.status !== 200) failures.push(`/r/${item} → ${res.status}, want 200`);
     else if (sha256(body) !== sha256(readFileSync(join(registryDir, item)))) failures.push(`/r/${item} differs from the build`);
     else if (!res.headers.get("content-type")?.includes("json")) failures.push(`/r/${item} is not served as JSON`);
-    else checks.push(`/r/${item} → 200 JSON, body = build`);
+    else if (res.headers.get("cache-control") !== REGISTRY_CACHE_CONTROL[options.indexable ? "production" : "preview"]) {
+      failures.push(`/r/${item} cache-control is ${JSON.stringify(res.headers.get("cache-control"))}`);
+    } else checks.push(`/r/${item} → 200 JSON, body = build, ${res.headers.get("cache-control")}`);
   }
 
   // 6. The Worker script runs: /llms.txt is not prerendered, only the server answers it.

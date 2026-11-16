@@ -46,18 +46,22 @@ jobs:
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile
       - id: stage
-        name: Stage
+        name: Stage and public URL
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           SUBDOMAIN: ${{ vars.SITE_WORKERS_SUBDOMAIN }}
           PREVIEW_MODE: ${{ vars.SITE_PREVIEW_MODE }}
-          SUBDOMAIN_OPTIONAL: "1" # before Cloudflare is configured: the stage is enough
+          SUBDOMAIN_OPTIONAL: "1" # before Cloudflare is configured: the stage is enough (no URL)
         run: node infra/site/scripts/cli.ts target
       - run: pnpm --filter @open-upload/web typecheck
       # The same Vite build Alchemy's Website.Vite runs inside `alchemy deploy`, without credentials:
       # apps/web/dist/deploy = assets/ + server/ (Worker modules, uploaded as is by site-deploy).
       - name: Build the site for Workers
+        env:
+          # The stage's own origin (preview or production), baked into the prerendered install commands
+          # (`npx shadcn add <origin>/r/<item>.json`); the page also uses window.location.origin once hydrated.
+          VITE_SITE_URL: ${{ steps.stage.outputs.url }}
         run: pnpm --filter @open-upload/web build:worker
       - name: Check the build output
         env:

@@ -5,7 +5,7 @@ WebMCP SDK (`webmcp-sdk-docs*`, same Cloudflare account). The code is vendored f
 `infra/docs`, adapted to a site that has a Worker script.
 
 **Status (2026-11-16):** implemented and tested without credentials. It has never deployed to Cloudflare, because no
-account is connected yet. Section 7 lists what is tested and what is not.
+account is connected yet. Section 8 lists what is tested and what is not.
 
 ## 1. The two workflows
 
@@ -46,14 +46,30 @@ only release secrets to `refs/heads/main`.
 | Stage | Worker | State store | When |
 |---|---|---|---|
 | `production` | `better-upload-site` | `better-upload-site-state` | push to main (only if the SHA is still the head of main), or rollback |
-| `pr-<n>` | `better-upload-site-pr-<n>` | `better-upload-site-preview-state` | `SITE_PREVIEW_MODE=dynamic` |
-| `staging` | `better-upload-site-staging` | `better-upload-site-preview-state` | `SITE_PREVIEW_MODE=staging` (default): one shared preview, last PR wins |
+| `pr-<n>` | `better-upload-site-pr-<n>` | `better-upload-site-preview-state` | `SITE_PREVIEW_MODE=dynamic`: the contract default, one Worker per PR |
+| `staging` | `better-upload-site-staging` | `better-upload-site-preview-state` | `SITE_PREVIEW_MODE=staging` (optional): one shared preview, the last PR wins; the code also falls back to it when the variable is unset |
 
 Previews are never created for:
 - **forks**;
 - **Dependabot** PRs, which are built only, unless `SITE_PREVIEW_DEPENDABOT=true`.
 
-The registry follows the preview at `<preview URL>/r/<item>.json`, so `npx shadcn add` can be tried from any PR.
+**The shadcn registry follows the preview.**
+- `site-build` runs `registry:build`, so `/r/*.json` is part of the artifact.
+- The stage URL is baked into the prerendered install commands (`VITE_SITE_URL`), and the page also uses
+  `window.location.origin` once hydrated. So `npx shadcn add <preview URL>/r/<item>.json` works on every PR.
+- Registry items have no absolute self-reference: their dependencies are shadcn's `button` and `progress`.
+- `/r/*` is data. Previews send `Cache-Control: no-cache`; production sends `public, max-age=300`.
+
+**A `worker` site, not a `static` one.** The search, `llms.txt` and `*.md` routes need a script, so the Worker
+carries the prebuilt server modules alongside its assets.
+
+The Workers Free plan limits are:
+- 100,000 script requests per day;
+- 10 ms CPU per request;
+- 3 MiB of gzipped script; `check-site` fails above it, and the site currently uses about 0.95 MB.
+
+The prerendered pages, the registry and the chunks are static assets: they are served without invoking the script
+and do not count against the request limit. Preview Workers have no binding and no secret.
 
 ## 2. GitHub settings (to apply once the PR is merged)
 
@@ -61,11 +77,11 @@ The registry follows the preview at `<preview URL>/r/<item>.json`, so `npx shadc
 
 | Environment | Deployment branches and tags | Reviewers | Secrets |
 |---|---|---|---|
-| `site-production` | *Selected branches and tags* → add branch rule `main` (nothing else) | optional | `CLOUDFLARE_API_TOKEN` (production token), `CLOUDFLARE_ACCOUNT_ID`, `SITE_STATE_TOKEN` (`better-upload-site-state.token`) |
-| `site-preview` | same: branch `main` only | optional (see §5) | `CLOUDFLARE_API_TOKEN` (preview token), `CLOUDFLARE_ACCOUNT_ID`, `SITE_STATE_TOKEN` (`better-upload-site-preview-state.token`) |
+| `site-production` | *Selected branches and tags* → add branch rule `main` (nothing else) | none by default (optional) | `CLOUDFLARE_API_TOKEN` (production token), `CLOUDFLARE_ACCOUNT_ID`, `SITE_STATE_TOKEN` (`better-upload-site-state.token`) |
+| `site-preview` | same: branch `main` only | none by default (optional, §5) | `CLOUDFLARE_API_TOKEN` (preview token), `CLOUDFLARE_ACCOUNT_ID`, `SITE_STATE_TOKEN` (`better-upload-site-preview-state.token`) |
 | `npm-release` | branches `main` and `next` | none | none (OIDC) |
 | `release-finalize` | branches `main` and `next` | **required: the owner** | none |
-| `integration-providers` | branch `main` only | none | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (keys scoped to one test bucket) |
+| `cloud-tests` | branch `main` only | none | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (keys scoped to one test bucket) |
 
 `preflight` (run before every Alchemy call with a token) refuses a preview token that can reach production, unless
 the environment is main-only or has a reviewer. It reads the policy through the API.
@@ -73,8 +89,8 @@ the environment is main-only or has a reviewer. It reads the policy through the 
 **Repository variables:**
 - `SITE_DEPLOY_ENABLED=true` (kill switch);
 - `SITE_WORKERS_SUBDOMAIN=<account subdomain>`;
-- `SITE_PREVIEW_MODE=staging|dynamic`;
-- optional: `SITE_PREVIEW_DEPENDABOT`, `PROVIDER_TESTS_ENABLED=true` (plus `R2_ACCOUNT_ID`, `R2_BUCKET`, `AWS_REGION`,
+- `SITE_PREVIEW_MODE=dynamic` (contract default; `staging` is optional);
+- optional: `SITE_PREVIEW_DEPENDABOT`, `CLOUD_TESTS_ENABLED=true` (plus `R2_ACCOUNT_ID`, `R2_BUCKET`, `AWS_REGION`,
   `AWS_BUCKET`), `NPM_RELEASE_ENABLED=true` (docs/RELEASING.md).
 
 **Branch ruleset on `main`:**
@@ -94,8 +110,8 @@ permission and no Secrets Store permission: state goes over HTTPS with the store
 |---|---|---|
 | `site-bootstrap-temp` | Workers: Admin (All Workers) + Account Secrets Store: Edit | 1 day, deleted right after §4 |
 | `github-site-production` | Workers · Specified Workers: `better-upload-site` · Editor | 1 year |
-| `github-site-staging` (mode `staging`) | Workers · Specified Workers: `better-upload-site-staging` · Editor | 1 year |
-| `github-site-preview-dynamic` (mode `dynamic`) | Workers: Admin (All Workers) | 1 year |
+| `github-site-staging` (mode `staging`, optional) | Workers · Specified Workers: `better-upload-site-staging` · Editor | 1 year |
+| `github-site-preview-dynamic` (mode `dynamic`, default) | Workers: Admin (All Workers) | 1 year |
 
 **Residual risk (single account).**
 - A dynamic-mode preview token can modify or delete every Worker of the account. That includes this production,
@@ -151,7 +167,24 @@ With `site-preview` restricted to `main`, PR code cannot read its secrets, so a 
   - dev: `pnpm --filter @open-upload/web dev`, or `dev:workerd` (local state only; `apps/web/alchemy.run.ts`
     refuses non-local stages).
 
-## 7. Tested vs not tested
+## 7. Mapping to the common contract
+
+The kit's contract names the files `ci.yml` (with `site-build`) and `deploy.yml`. Here they are `site.yml` and
+`site-deploy.yml`, the layout WebMCP uses (`docs.yml` and `docs-deploy.yml`). The same contract applies:
+- the build is unprivileged and every PR lifecycle event completes a run;
+- the deploy reconciles on `workflow_run` of that workflow.
+
+Splitting them means the site artifact does not wait for e2e to finish. The gate still waits for every required
+check of the commit. Renaming the files would be a mechanical change, done when the kit copy is vendored.
+
+Other differences:
+- **Gate.** It reads check runs from GitHub Actions only (no commit statuses), because every required check here is
+  an Actions job. It also requires `workflow-lint`, beyond the contract's list.
+- **Sweep.** It lists `pr-<n>` stages from the preview state store (WebMCP's tested approach), not Workers by
+  prefix through the API. A Worker created outside Alchemy state would not be swept. To align when the kit ships its
+  version.
+
+## 8. Tested vs not tested
 
 **Tested locally (2026-11-16, no credentials):**
 - the real site built by `build:worker` (5 s; 80 modules, about 0.95 MB gzip of the 3 MiB limit);

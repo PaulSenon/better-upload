@@ -26,15 +26,17 @@ test("previews are noindex, production is not", () => {
   assert.ok(!names(true).includes("X-Robots-Tag"));
 });
 
-test("_headers file: one global rule plus immutable hashed assets, within Cloudflare limits", () => {
+test("_headers file: global rule, immutable hashed assets, registry cache per stage, within Cloudflare limits", () => {
   const file = renderHeadersFile({ indexable: true });
   assert.match(file, /^# Generated/);
   assert.match(file, /\n\/\*\n {2}Content-Security-Policy: default-src 'self';/);
-  assert.match(file, /\n\/assets\/\*\n {2}Cache-Control: public, max-age=31536000, immutable\n$/);
+  assert.match(file, /\n\/assets\/\*\n {2}Cache-Control: public, max-age=31536000, immutable\n/);
+  assert.match(file, /\n\/r\/\*\n {2}Cache-Control: public, max-age=300\n$/);
+  assert.match(renderHeadersFile({ indexable: false }), /\n\/r\/\*\n {2}Cache-Control: no-cache\n$/);
   assert.equal(IMMUTABLE_CACHE_CONTROL, "public, max-age=31536000, immutable");
   for (const line of file.split("\n")) assert.ok(line.length <= 2000);
   const rules = file.split("\n").filter((l) => l.startsWith("/"));
-  assert.deepEqual(rules, ["/*", "/assets/*"]);
+  assert.deepEqual(rules, ["/*", "/assets/*", "/r/*"]);
   assert.doesNotMatch(file, /X-Robots-Tag/);
   assert.match(renderHeadersFile({ indexable: false }), /X-Robots-Tag: noindex, nofollow/);
 });

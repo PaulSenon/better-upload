@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { IMMUTABLE_CACHE_CONTROL, securityHeaders } from "../src/headers.ts";
+import { IMMUTABLE_CACHE_CONTROL, REGISTRY_CACHE_CONTROL, securityHeaders } from "../src/headers.ts";
 import { parseOrigin, runSmoke } from "../src/smoke.ts";
 
 let root: string;
@@ -51,7 +51,7 @@ async function serve(b: Behaviour): Promise<{ url: string; server: Server }> {
     } else if (path.startsWith("/assets/")) {
       res.writeHead(200, { ...headers, "cache-control": b.mutableAssets ? "public, max-age=0" : IMMUTABLE_CACHE_CONTROL }).end("1");
     } else if (path === "/r/demo.json") {
-      res.writeHead(200, { ...headers, "content-type": b.registryAsHtml ? "text/html" : "application/json" }).end(REGISTRY_ITEM);
+      res.writeHead(200, { ...headers, "content-type": b.registryAsHtml ? "text/html" : "application/json", "cache-control": REGISTRY_CACHE_CONTROL[b.indexable ? "production" : "preview"] }).end(REGISTRY_ITEM);
     } else if (path === "/llms.txt" && !b.noWorker) {
       res.writeHead(200, { "content-type": "text/plain" }).end("# site\n- /docs\n");
     } else {

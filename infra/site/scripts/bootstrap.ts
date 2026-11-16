@@ -204,10 +204,12 @@ export function permissionReport(subdomain: string): string {
   const staging = workerName("staging");
   return [
     "",
-    "Isaac — create two ACCOUNT tokens (Manage Account → API Tokens → Create Token → Custom token):",
+    "Isaac — create the ACCOUNT tokens (Manage Account → API Tokens → Create Token → Custom token):",
     "",
     `  github-site-production   Workers · Specified Workers: ${prod} · Editor`,
-    `  github-site-staging      Workers · Specified Workers: ${staging} · Editor`,
+    `  github-site-preview-dynamic  Workers · All Workers · Admin   (SITE_PREVIEW_MODE=dynamic, the contract default;`,
+    "                               account-wide: can touch every Worker of the account, docs/SITE-DEPLOY.md §3)",
+    `  github-site-staging      Workers · Specified Workers: ${staging} · Editor   (only with SITE_PREVIEW_MODE=staging)`,
     "",
     "  Nothing else: no Secrets Store, no zone, no account-wide Workers role, no access to the",
     `  state-store Workers (CI reaches state over HTTPS with the bearer tokens written to --out-dir).`,
@@ -216,12 +218,12 @@ export function permissionReport(subdomain: string): string {
     "Agent — GitHub (tokens through stdin only):",
     `  gh secret set CLOUDFLARE_API_TOKEN  --env site-production < <github-site-production token file>`,
     `  gh secret set SITE_STATE_TOKEN      --env site-production < <out-dir>/${STATE_STORES.production}.token`,
-    `  gh secret set CLOUDFLARE_API_TOKEN  --env site-preview    < <github-site-staging token file>`,
+    `  gh secret set CLOUDFLARE_API_TOKEN  --env site-preview    < <github-site-preview-dynamic (or github-site-staging) token file>`,
     `  gh secret set SITE_STATE_TOKEN      --env site-preview    < <out-dir>/${STATE_STORES.preview}.token`,
     "  printf %s <account id> | gh secret set CLOUDFLARE_ACCOUNT_ID --env site-production",
     "  printf %s <account id> | gh secret set CLOUDFLARE_ACCOUNT_ID --env site-preview",
     `  gh variable set SITE_WORKERS_SUBDOMAIN --body ${subdomain}`,
-    "  gh variable set SITE_PREVIEW_MODE --body staging",
+    "  gh variable set SITE_PREVIEW_MODE --body dynamic   # or staging",
     "Then delete every token file.",
   ].join("\n");
 }

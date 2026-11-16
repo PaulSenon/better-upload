@@ -128,8 +128,13 @@ provisoire, uniquement s'ils n'existent pas. Il affiche enfin les commandes rest
 
 Ensuite :
 1. Crée les tokens CI indiqués par le script ([docs/SITE-DEPLOY.md §3](SITE-DEPLOY.md)) :
-   - `github-site-production` (Editor sur `better-upload-site`) ;
-   - `github-site-staging` (Editor sur `better-upload-site-staging`).
+   - `github-site-production` : Editor sur `better-upload-site` ;
+   - `github-site-preview-dynamic` : Workers Admin sur tout le compte, pour une preview par PR (choix par défaut du
+     standard commun).
+     - **Risque :** ce token peut toucher tous les Workers du compte, y compris ceux de WebMCP.
+     - **Ce qui le limite :** il n'est lisible que depuis `main`.
+   - Pour éviter ce risque, choisis une preview unique partagée : crée `github-site-staging` (Editor sur
+     `better-upload-site-staging`) et mets `SITE_PREVIEW_MODE=staging`.
 2. **Supprime `site-bootstrap-temp`.**
 
 > Si la commande échoue : **redonne-moi la main** avec la sortie complète. C'est la partie qui n'a jamais tourné sur un
@@ -147,12 +152,12 @@ recommande sans).
 D=~/site-bootstrap-secrets
 gh secret set CLOUDFLARE_API_TOKEN --env site-production < <fichier du token github-site-production>
 gh secret set SITE_STATE_TOKEN     --env site-production < $D/better-upload-site-state.token
-gh secret set CLOUDFLARE_API_TOKEN --env site-preview    < <fichier du token github-site-staging>
+gh secret set CLOUDFLARE_API_TOKEN --env site-preview    < <fichier du token github-site-preview-dynamic>
 gh secret set SITE_STATE_TOKEN     --env site-preview    < $D/better-upload-site-preview-state.token
 printf %s <account id> | gh secret set CLOUDFLARE_ACCOUNT_ID --env site-production
 printf %s <account id> | gh secret set CLOUDFLARE_ACCOUNT_ID --env site-preview
 gh variable set SITE_WORKERS_SUBDOMAIN --body <sous-domaine>
-gh variable set SITE_PREVIEW_MODE --body staging
+gh variable set SITE_PREVIEW_MODE --body dynamic     # ou staging
 gh variable set SITE_DEPLOY_ENABLED --body true
 rm -rf "$D" <fichiers de token>
 ```
@@ -185,29 +190,29 @@ Les commandes d'installation du registry affichées dans la doc utilisent automa
 ## Étape 8 — Tests sur les vrais fournisseurs (optionnel, 15 min)
 
 La CI teste les PR contre MinIO. Les tests sur R2 et AWS ne tournent que sur `main` : chaque push, chaque mardi, ou à la
-main. Leurs clés sont dans l'environnement `integration-providers`, limité à `main`, donc aucune PR ne peut les lire.
+main. Leurs clés sont dans l'environnement `cloud-tests`, limité à `main`, donc aucune PR ne peut les lire.
 
 1. Crée un bucket **dédié aux tests** chez chaque fournisseur :
    - **R2** : bucket `open-upload-ci`, token *Object Read & Write* limité à ce bucket.
    - **AWS** : bucket `open-upload-ci-<suffixe>`, utilisateur IAM limité à ce bucket (`s3:PutObject`, `GetObject`,
      `DeleteObject`, `ListBucket`, `ListMultipartUploadParts`, `AbortMultipartUpload`), règle *Abort incomplete
      multipart uploads after 1 day*.
-2. Crée l'environnement `integration-providers` (branche `main` uniquement), puis :
+2. Crée l'environnement `cloud-tests` (branche `main` uniquement), puis :
 
    ```bash
-   gh secret set R2_ACCESS_KEY_ID --env integration-providers
-   gh secret set R2_SECRET_ACCESS_KEY --env integration-providers
-   gh secret set AWS_ACCESS_KEY_ID --env integration-providers
-   gh secret set AWS_SECRET_ACCESS_KEY --env integration-providers
+   gh secret set R2_ACCESS_KEY_ID --env cloud-tests
+   gh secret set R2_SECRET_ACCESS_KEY --env cloud-tests
+   gh secret set AWS_ACCESS_KEY_ID --env cloud-tests
+   gh secret set AWS_SECRET_ACCESS_KEY --env cloud-tests
    gh variable set R2_ACCOUNT_ID --body <account id>
    gh variable set R2_BUCKET --body open-upload-ci
    gh variable set AWS_REGION --body eu-west-3
    gh variable set AWS_BUCKET --body open-upload-ci-<suffixe>
-   gh variable set PROVIDER_TESTS_ENABLED --body true
+   gh variable set CLOUD_TESTS_ENABLED --body true
    gh workflow run CI --ref main
    ```
 
-**Vérification :** le job `integration-providers` est vert, et le tableau de conformité de chaque fournisseur apparaît
+**Vérification :** le job `cloud-tests` est vert, et le tableau de conformité de chaque fournisseur apparaît
 dans ses logs.
 
 > Si un check de conformité échoue : **redonne-moi la main** avec le tableau.

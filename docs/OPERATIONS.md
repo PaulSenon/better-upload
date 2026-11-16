@@ -20,8 +20,8 @@ On every PR and push to `main`, with no secret (`permissions: {}` by default, re
 
 These names are the required checks of the branch ruleset and of the site deploy gate (`infra/site/src/gate.ts`).
 
-`integration-providers` (real R2 / AWS) runs only on `main` (push, Tuesdays, dispatch) when
-`PROVIDER_TESTS_ENABLED=true`. Its keys live in the `integration-providers` environment, restricted to `main`, so PR
+`cloud-tests` (real R2 / AWS) runs only on `main` (push, Tuesdays, dispatch) when
+`CLOUD_TESTS_ENABLED=true`. Its keys live in the `cloud-tests` environment, restricted to `main`, so PR
 code never sees them. Use a dedicated test bucket with the CORS and lifecycle rule from `recommendedBucketConfig()`.
 
 ## npm releases (`release.yml`, `version-pr.yml`): off until `NPM_RELEASE_ENABLED=true`
