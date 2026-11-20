@@ -1,76 +1,104 @@
+# Checks for every PR and every push to main. Runs PR code, so: no secret, read-only token,
+# credentials never persisted. The job names below are the check-run names the site deploy gate
+# requires (infra/site/src/gate.ts): rename them together.
+#
+# Real providers (R2, AWS) are NOT tested here: see cloud-tests.yml (main only, never PR-triggered).
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
-    name: Lint, types, unit tests, build
-    runs-on: ubuntu-latest
+    name: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false }
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the change-note rule needs the merge base with the PR's base branch
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: 24, cache: pnpm }
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm # zizmor: ignore[cache-poisoning] -- this job publishes nothing; release and site builds run without cache
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec biome ci .
       - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm test # packages, infra/site (deploy logic) and tooling/release (release logic)
       - run: pnpm check:packages
+      - run: pnpm check:workflows # delivery kit invariants W1–W9
+      - name: Change note
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          node tooling/release/check-changeset.mjs "origin/$BASE_REF"
 
   integration:
-    name: Integration (MinIO${{ vars.R2_BUCKET && ', R2' || '' }}${{ vars.AWS_BUCKET && ', AWS' || '' }})
-    runs-on: ubuntu-latest
+    name: integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false }
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: 24, cache: pnpm }
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm # zizmor: ignore[cache-poisoning] -- no artifact or credential leaves this job
       - run: pnpm install --frozen-lockfile
       - run: pnpm minio:up
-      - run: pnpm test:integration
-        env:
-          # Real providers run only when configured (repository variables + secrets).
-          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          AWS_BUCKET: ${{ vars.AWS_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - run: pnpm test:integration # MinIO only
 
   convex:
-    name: Convex component (local backend + MinIO)
-    runs-on: ubuntu-latest
+    name: convex
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false }
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: 24, cache: pnpm }
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm # zizmor: ignore[cache-poisoning] -- no artifact or credential leaves this job
       - run: pnpm install --frozen-lockfile
       - run: pnpm minio:up
       - run: pnpm build
       - name: Start an anonymous local Convex backend with the example app
         working-directory: packages/convex
-        env: { CONVEX_AGENT_MODE: anonymous }
+        env:
+          CONVEX_AGENT_MODE: anonymous
         run: |
           nohup npx convex dev --typecheck disable > convex.log 2>&1 &
           for _ in $(seq 1 60); do curl -sf http://127.0.0.1:3210/version >/dev/null && break; sleep 2; done
           for kv in S3_ENDPOINT=http://localhost:9000 S3_BUCKET=uploads-test S3_ACCESS_KEY_ID=minioadmin S3_SECRET_ACCESS_KEY=minioadmin UPLOAD_SECRET=ci-convex-secret-0123456789abcdef-ci APP_ORIGINS=http://localhost:5173; do
-            npx convex env set "${kv%%=*}" "${kv#*=}"
+            # The backend may still be applying the first push (OptimisticConcurrencyControlFailure, 503): retry.
+            for attempt in 1 2 3 4 5; do
+              npx convex env set "${kv%%=*}" "${kv#*=}" && break
+              [ "$attempt" = 5 ] && exit 1
+              sleep $((attempt * 3))
+            done
           done
           sleep 5
       - name: Create the test bucket
@@ -83,24 +111,35 @@ jobs:
         run: cat packages/convex/convex.log
 
   e2e:
-    name: E2E (${{ matrix.browser }})
-    runs-on: ubuntu-latest
+    name: e2e (${{ matrix.browser }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         browser: [chromium, webkit, firefox, mobile-safari]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false }
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: 24, cache: pnpm }
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm # zizmor: ignore[cache-poisoning] -- no artifact or credential leaves this job
       - run: pnpm install --frozen-lockfile
       - run: pnpm minio:up
       - name: Install browser
-        run: pnpm --filter @open-upload/e2e exec playwright install --with-deps ${{ matrix.browser == 'mobile-safari' && 'webkit' || matrix.browser }}
-      - run: pnpm --filter @open-upload/e2e exec playwright test --project=${{ matrix.browser }}
-        env: { CI: "true" }
+        env:
+          BROWSER: ${{ matrix.browser == 'mobile-safari' && 'webkit' || matrix.browser }}
+        run: pnpm --filter @open-upload/e2e exec playwright install --with-deps "$BROWSER"
+      - name: Playwright
+        env:
+          CI: "true"
+          PROJECT: ${{ matrix.browser }}
+        run: pnpm --filter @open-upload/e2e exec playwright test "--project=$PROJECT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
@@ -108,15 +147,45 @@ jobs:
           path: tests/e2e/playwright-report
           retention-days: 7
 
-  site:
-    name: Docs & registry build
-    runs-on: ubuntu-latest
+  # From the delivery kit: required by the ruleset (PR-only, so not part of the deploy gate).
+  dependency-review:
+    name: dependency-review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime
+
+  workflow-lint:
+    name: workflow-lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false }
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: 24, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @open-upload/web typecheck
-      - run: pnpm --filter @open-upload/web build
+        with:
+          persist-credentials: false
+      - name: zizmor (workflow security audit, pedantic)
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          version: "1.32.0" # the action pin does not pin the tool
+          persona: pedantic
+          advanced-security: false # plain annotations; no security-events permission
+          annotations: true
+          online-audits: false
+      - name: actionlint (release binary, checksum-verified)
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          curl -fsSLo "$RUNNER_TEMP/actionlint.tgz" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/actionlint.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color

@@ -6,11 +6,11 @@
   "scripts": {
     "dev": "vite dev",
     "build": "pnpm registry:build && vite build",
+    "build:worker": "pnpm registry:build && node scripts/build-worker.ts",
     "registry:build": "shadcn build ./registry.json --output ./public/r",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "deploy": "alchemy deploy",
-    "destroy": "alchemy destroy"
+    "dev:workerd": "alchemy dev"
   },
   "dependencies": {
     "@open-upload/client": "workspace:*",
@@ -32,6 +32,7 @@
   },
   "devDependencies": {
     "@alchemy.run/cloudflare": "2.0.0-beta.85",
+    "@alchemy.run/cloudflare-runtime": "2.0.0-beta.85",
     "@alchemy.run/frontend-frameworks": "2.0.0-beta.85",
     "@effect/platform-node": "^4.1.0",
     "@tailwindcss/vite": "^4.3.0",
