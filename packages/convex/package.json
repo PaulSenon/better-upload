@@ -60,7 +60,7 @@
     "@edge-runtime/vm": "^5.0.0",
     "@types/node": "catalog:",
     "convex": "^1.49.0",
-    "convex-test": "^0.0.70",
+    "convex-test": "^0.0.71",
     "publint": "^0.3.25",
     "typescript": "catalog:",
     "vitest": "catalog:",
