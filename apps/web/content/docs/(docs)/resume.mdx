@@ -1,0 +1,41 @@
+---
+title: Resume and file identity
+description: How an interrupted upload continues, days later, without ever mixing files.
+icon: History
+---
+
+## Three ways an upload continues
+
+1. **Same tab** (network drop, pause): automatic. Parts already confirmed by the storage are never re-sent.
+2. **After a reload, same device**: the session is persisted in IndexedDB (ticket and file name only). On app start,
+   `usePendingUploads` / `client.$restore()` lists it as `needs-file`; when the user selects the file again
+   (`task.attachFile(file)`), or simply uploads the same file again with `upload()`, it continues.
+3. **Another device, or the browser lost its storage**: only if your app stored the ticket (`onUploadStarted`). Hand it
+   back with `client.videos.resume(file, { ticket })`.
+
+If nobody kept the ticket, the upload starts again from zero and the old one expires on its own.
+
+## Is it the same file?
+
+A re-selected file is a new object: the browser only gives its name, size and date, and on iPhone the Photos picker may
+return a re-encoded copy. Before appending anything, the SDK reads parts of the selected file locally, checksums them,
+and compares them with the checksums **the bucket** reports for the parts it already holds.
+
+| `verify` | What is checked |
+|---|---|
+| `'auto'` (default) | First, last and 3 random uploaded parts; **all** uploaded parts when the name, type or modification date differ. |
+| `'sample'` | First, last and 3 random uploaded parts. |
+| `'full'` | Every uploaded part (local read only, no network). |
+| `'metadata'` | Name, size, type and date only. Fast, can be fooled. |
+
+A different video or a re-encode differs almost everywhere and fails immediately. A file edited in place changes its
+modification date, which triggers a full check under `'auto'`. When `upload()` auto-matches a file by name and size and
+the bytes differ, it simply starts a fresh upload; when the user re-selects a file for a pending upload, it is refused
+with `FILE_MISMATCH` and the task waits for the right file.
+
+## Expiry
+
+Unfinished uploads expire: the ticket after `resume.ttl` (default 7 days, kept below the provider's cleanup window), and
+the bucket discards incomplete uploads (R2 after 7 days, MinIO after 24 hours, your lifecycle rule on AWS). An expired
+task gets status `expired` with `userAction: 'restart'`. **It never restarts silently**: show a message, and call
+`task.restart()` when the user agrees (re-sending gigabytes on mobile data must be a choice).

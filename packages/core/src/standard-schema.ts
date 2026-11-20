@@ -41,3 +41,28 @@ export declare namespace StandardSchemaV1 {
 export type AnySchema = StandardSchemaV1<any, any>;
 export type SchemaInput<S> = S extends StandardSchemaV1 ? StandardSchemaV1.InferInput<S> : undefined;
 export type SchemaOutput<S> = S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : undefined;
+
+export type ValidationResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly issues: ReadonlyArray<StandardSchemaV1.Issue> };
+
+/** Runs a Standard Schema validator. With no schema, the value passes through unchanged. */
+export async function validateSchema<S extends AnySchema | undefined>(
+  schema: S,
+  value: unknown,
+): Promise<ValidationResult<SchemaOutput<S>>> {
+  if (!schema) return { ok: true, value: value as SchemaOutput<S> };
+  const result = await schema['~standard'].validate(value);
+  if (result.issues) return { ok: false, issues: result.issues };
+  return { ok: true, value: result.value as SchemaOutput<S> };
+}
+
+/** One-line summary of validation issues, for error messages. */
+export function formatIssues(issues: ReadonlyArray<StandardSchemaV1.Issue>): string {
+  return issues
+    .map((issue) => {
+      const path = issue.path?.map((p) => (typeof p === 'object' ? String(p.key) : String(p))).join('.');
+      return path ? `${path}: ${issue.message}` : issue.message;
+    })
+    .join('; ');
+}

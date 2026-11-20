@@ -1,9 +1,51 @@
 {
-  "name": "@bu-draft/s3",
-  "version": "0.0.0-design",
-  "private": true,
-  "description": "DESIGN DRAFT — types only, not implemented, never published. Placeholder scope.",
+  "name": "@open-upload/s3",
+  "version": "0.0.0",
+  "description": "S3-compatible storage adapter (AWS S3, Cloudflare R2, MinIO, \u2026): minimal SigV4 on Web Crypto, no AWS SDK.",
   "license": "MIT",
   "type": "module",
-  "types": "./src/index.ts"
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PaulSenon/better-upload.git",
+    "directory": "packages/s3"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cloudflare": {
+      "source": "./src/cloudflare.ts",
+      "types": "./dist/cloudflare.d.ts",
+      "default": "./dist/cloudflare.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:package": "publint && attw --pack . --profile esm-only"
+  },
+  "dependencies": {
+    "@open-upload/core": "workspace:^"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "publint": "^0.3.25",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
 }

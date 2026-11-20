@@ -1,0 +1,58 @@
+---
+title: Server
+description: Implement the contract with typed hooks; mount one Fetch handler.
+icon: Server
+---
+
+## Hooks, in the order they run
+
+| Hook | When | Return |
+|---|---|---|
+| `onUploadRequested({ context, input, file, files, sessionId, errors })` | **1.** A client asks to upload a file (once per file, after rules and `input` passed). Authorize here. | `{ key, meta? }`: where the file goes, plus server-only data kept with the session. |
+| `onUploadStarted({ context, input, session, ticket })` | **2.** The upload exists in the bucket. Optional. | Store `ticket` in your DB if you want resume from another device. |
+| `reauthorize({ context, session, op, errors })` | Every later call (sign, status, complete, abort). Optional. | Throw to refuse. |
+| `onUploadCompleted({ context, session, object, alreadyCompleted, errors })` | **3.** The file is fully stored. Required when the contract has an `output`. | The contract `output`. |
+| `onUploadAborted({ context, session })` | **4.** The client cancelled. Optional. | — |
+| `onDownloadRequested({ context, input, errors })` | A download link is hit, or `resolve()` called. | `{ key, fileName?, versionId?, expiresIn? }` |
+
+`meta`'s type is inferred from `onUploadRequested` and flows into every later hook. Forgetting an endpoint, or returning
+the wrong output shape, is a compile error.
+
+`onUploadCompleted` is **at-least-once**: a retried request after a lost response calls it again with
+`alreadyCompleted: true`. Use `session.id` as an idempotency key.
+
+## Context and middleware
+
+```ts
+const t = implement(contract).$context<{ user: User | null }>();
+const authed = t.videos.use(async ({ context, next }) => {
+  if (!context.user) throw new UploadError({ code: 'UNAUTHORIZED' });
+  return next({ user: context.user }); // narrows `context.user` for the hooks
+});
+```
+
+`t.use(...)` applies middleware to every endpoint.
+
+## No database
+
+The server stores nothing between calls. At `init` it seals the session (key, upload id, part plan, `meta`, expiry)
+into an encrypted **ticket** (JWE, AES-256-GCM, via `jose`). The client sends it back on every call; the server only
+accepts tickets it sealed. The bucket is the truth for which parts exist.
+
+`secret` accepts an array for rotation: the first seals, all open.
+
+## Receipts
+
+`complete` also returns a sealed **receipt** (`task.getSnapshot().receipt`). If your CMS creates its record in a separate
+request, forward the receipt and check it with `uploads.verifyReceipt(receipt, { endpoint })` instead of trusting the client.
+
+## Options
+
+| Option | Default | |
+|---|---|---|
+| `basePath` | `/api/upload` | Must match the client `baseUrl`. |
+| `signedUrlTtl` | `15m` | Part URLs are short-lived; the client re-signs transparently. |
+| `maxSignBatch` | `20` | |
+| `partSize` | 8 MiB parts, single PUT up to 8 MiB | Grows automatically to stay under 10,000 parts. |
+| `receiptTtl` | `24h` | |
+| `onError` | — | Logging hook. Internal details never reach the client. |

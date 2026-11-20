@@ -1,9 +1,60 @@
 {
-  "name": "@bu-draft/react",
-  "version": "0.0.0-design",
-  "private": true,
-  "description": "DESIGN DRAFT — types only, not implemented, never published. Placeholder scope.",
+  "name": "@open-upload/react",
+  "version": "0.0.0",
+  "description": "React hooks for the upload client (headless: bring your own UI or the shadcn registry components).",
   "license": "MIT",
   "type": "module",
-  "types": "./src/index.ts"
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PaulSenon/better-upload.git",
+    "directory": "packages/react"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:package": "publint && attw --pack . --profile esm-only"
+  },
+  "dependencies": {
+    "@open-upload/client": "workspace:^",
+    "@open-upload/core": "workspace:^"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@open-upload/server": "workspace:*",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "catalog:",
+    "happy-dom": "^21.0.4",
+    "publint": "^0.3.25",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "@types/react-dom": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  }
 }

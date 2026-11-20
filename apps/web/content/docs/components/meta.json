@@ -1,0 +1,16 @@
+{
+  "title": "Components",
+  "description": "shadcn registry",
+  "root": true,
+  "icon": "Component",
+  "pages": [
+    "index",
+    "---Components---",
+    "upload-dropzone",
+    "upload-item",
+    "upload-list",
+    "upload-resume-banner",
+    "download-button",
+    "upload"
+  ]
+}

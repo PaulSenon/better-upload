@@ -1,0 +1,98 @@
+---
+title: Payload CMS
+description: Resumable front-end uploads into Payload collections.
+---
+
+Payload 3 runs inside Next.js, so the upload server mounts as a Next.js route handler and talks to Payload through its
+Local API. Payload's own admin is getting resumable S3 uploads in v4; this guide is for **your front-end** (user
+uploads, large media) on Payload 3 or 4.
+
+## 1. A collection for large files
+
+Payload's upload collections re-read files to compute sizes and image variants, which is costly for multi-gigabyte
+files. Store large media as a plain collection pointing at the object:
+
+```ts title="collections/Videos.ts"
+import type { CollectionConfig } from 'payload';
+
+export const Videos: CollectionConfig = {
+  slug: 'videos',
+  access: { create: ({ req }) => Boolean(req.user), read: () => true },
+  fields: [
+    { name: 'title', type: 'text', required: true },
+    { name: 'key', type: 'text', required: true, unique: true, admin: { readOnly: true } },
+    { name: 'size', type: 'number', admin: { readOnly: true } },
+    { name: 'owner', type: 'relationship', relationTo: 'users' },
+  ],
+};
+```
+
+## 2. The upload route, authenticated with Payload
+
+```ts title="app/api/upload/[...path]/route.ts"
+import config from '@payload-config';
+import { getPayload } from 'payload';
+import { uploads } from '@/server/uploads';
+
+async function handler(request: Request) {
+  const payload = await getPayload({ config });
+  const { user } = await payload.auth({ headers: request.headers });
+  return uploads.fetch(request, { payload, user });
+}
+export { handler as GET, handler as POST };
+```
+
+Payload's own catch-all is `app/(payload)/api/[...slug]`; the more specific `api/upload` folder wins.
+
+## 3. Create the document when the file is stored
+
+**Inline** (simplest): create the document in `onUploadCompleted`, using `session.id` as an idempotency key.
+
+```ts title="server/uploads.ts"
+const t = implement(contract).$context<{ payload: Payload; user: User | null }>();
+
+export const uploads = createUploadServer({
+  storage,
+  secret: process.env.UPLOAD_SECRET!,
+  router: t.router({
+    videos: t.videos.handler({
+      onUploadRequested: ({ context, sessionId, file, errors }) => {
+        if (!context.user) errors('UNAUTHORIZED');
+        return { key: `videos/${sessionId}/${file.name}`, meta: { owner: context.user!.id } };
+      },
+      onUploadCompleted: async ({ context, session, object, input }) => {
+        const existing = await context.payload.find({ collection: 'videos', where: { key: { equals: object.key } } });
+        const doc =
+          existing.docs[0] ??
+          (await context.payload.create({
+            collection: 'videos',
+            data: { title: input.title, key: object.key, size: object.size, owner: session.meta.owner },
+          }));
+        return { id: doc.id };
+      },
+    }),
+  }),
+});
+```
+
+**Receipt** (when the document is created by Payload's own form or REST API): the client sends
+`snapshot.receipt` with the document; a `beforeChange` hook verifies it and fills the fields, so clients can't claim
+a key they didn't upload.
+
+```ts title="collections/Videos.ts"
+hooks: {
+  beforeChange: [
+    async ({ data, operation }) => {
+      if (operation !== 'create') return data;
+      const receipt = await uploads.verifyReceipt(data.receipt, { endpoint: 'videos' });
+      if (!receipt) throw new Error('Invalid or expired upload receipt');
+      return { ...data, key: receipt.object.key, size: receipt.object.size, receipt: undefined };
+    },
+  ],
+},
+```
+
+## 4. Serving
+
+Use a download endpoint whose `onDownloadRequested` checks access with `payload.find` (it respects Payload access
+control) and returns the document's `key`; render `client.videos.download.link({ input: { id } })`.

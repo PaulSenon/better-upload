@@ -5,18 +5,18 @@
 
 ## Summary table
 
-| Project | Version (2026-11-12) | What to borrow | What to avoid |
-|---|---|---|---|
-| oRPC | `@orpc/*` 1.16.2 (latest), 2.0.0-beta.50 (beta, docs now describe v2) | contract = data + Standard Schema; `implement(contract)`; type-only client import; typed `.errors()`; one core `handle(request)` + per-runtime adapters | deep builder generics; shipping the full router to the client; coupling our wire format to theirs |
-| UploadThing | `uploadthing` 7.7.4, `@uploadthing/react` 7.3.3 | `typeof router` typed client; middleware return → typed metadata; typed data returned from completion; progress granularity | hosted ingest + callback webhook; mandatory token/service; file-type keys mixed with config |
-| better-upload (Nic13Gamer) | `@better-upload/server` & `/client` 3.0.20; legacy `better-upload` 2.0.3 | S3-direct BYO bucket; provider presets; shadcn registry `@better-upload` with headless `control` prop | **name collision**; no documented pause/resume/persistence |
-| uploadcn | `@uploadcn/core` 0.1.5 (created 2026-10-09) | claims multipart resume after pause/drop/reload; shadcn `@uploadcn` (67 items) | storage location of resume state undocumented **[unverified]** |
-| Alchemy | `alchemy` 2.0.0-beta.86 (v2 = rewrite on Effect 4.1.4) | small capability interfaces per provider; capability-scoped bindings; adopt/read semantics ≈ re-attach to existing multipart | Effect as a hard dependency of our core |
-| TanStack | query 5.107.1, store 0.11.2, pacer 0.23.1, devtools 0.16.0 | framework-free core; `get/subscribe` store; `useSyncExternalStore` adapters ~50 lines; identity `queryOptions()` helper; devtools via event client | — |
-| shadcn | CLI 4.23.0 | logic in npm, markup copied from a namespaced registry (`registry:ui`), headless control prop | — |
-| Uppy | `@uppy/aws-s3` 6.3.1, golden-retriever 6.0.1 | ListParts reconciliation; "ghost" files needing reselection; IndexedDB metadata | Service-Worker file refs don't survive browser restart; 24 h default expiry |
-| tus-js-client | 4.3.1 | `fingerprint()`, `urlStorage`, `findPreviousUploads()` / `resumeFromPreviousUpload()` | — |
-| IETF resumable upload | draft-ietf-httpbis-resumable-upload-15 (2026-11-02) | offset-based resume protocol; possible future transport adapter | not S3-compatible; does not apply to presigned multipart |
+| Project                    | Version (2026-11-12)                                                     | What to borrow                                                                                                                                          | What to avoid                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| oRPC                       | `@orpc/*` 1.16.2 (latest), 2.0.0-beta.50 (beta, docs now describe v2)    | contract = data + Standard Schema; `implement(contract)`; type-only client import; typed `.errors()`; one core `handle(request)` + per-runtime adapters | deep builder generics; shipping the full router to the client; coupling our wire format to theirs |
+| UploadThing                | `uploadthing` 7.7.4, `@uploadthing/react` 7.3.3                          | `typeof router` typed client; middleware return → typed metadata; typed data returned from completion; progress granularity                             | hosted ingest + callback webhook; mandatory token/service; file-type keys mixed with config       |
+| better-upload (Nic13Gamer) | `@better-upload/server` & `/client` 3.0.20; legacy `better-upload` 2.0.3 | S3-direct BYO bucket; provider presets; shadcn registry `@better-upload` with headless `control` prop                                                   | **name collision**; no documented pause/resume/persistence                                        |
+| uploadcn                   | `@uploadcn/core` 0.1.5 (created 2026-10-09)                              | claims multipart resume after pause/drop/reload; shadcn `@uploadcn` (67 items)                                                                          | storage location of resume state undocumented **[unverified]**                                    |
+| Alchemy                    | `alchemy` 2.0.0-beta.86 (v2 = rewrite on Effect 4.1.4)                   | small capability interfaces per provider; capability-scoped bindings; adopt/read semantics ≈ re-attach to existing multipart                            | Effect as a hard dependency of our core                                                           |
+| TanStack                   | query 5.107.1, store 0.11.2, pacer 0.23.1, devtools 0.16.0               | framework-free core; `get/subscribe` store; `useSyncExternalStore` adapters ~50 lines; identity `queryOptions()` helper; devtools via event client      | —                                                                                                 |
+| shadcn                     | CLI 4.23.0                                                               | logic in npm, markup copied from a namespaced registry (`registry:ui`), headless control prop                                                           | —                                                                                                 |
+| Uppy                       | `@uppy/aws-s3` 6.3.1, golden-retriever 6.0.1                             | ListParts reconciliation; "ghost" files needing reselection; IndexedDB metadata                                                                         | Service-Worker file refs don't survive browser restart; 24 h default expiry                       |
+| tus-js-client              | 4.3.1                                                                    | `fingerprint()`, `urlStorage`, `findPreviousUploads()` / `resumeFromPreviousUpload()`                                                                   | —                                                                                                 |
+| IETF resumable upload      | draft-ietf-httpbis-resumable-upload-15 (2026-11-02)                      | offset-based resume protocol; possible future transport adapter                                                                                         | not S3-compatible; does not apply to presigned multipart                                          |
 
 ## 1. oRPC — <https://orpc.dev> (was orpc.unnoq.com), <https://github.com/unnoq/orpc>
 
@@ -43,15 +43,15 @@ export const orpc: RouterContractClient<typeof contract> = createORPCClient(link
 ## 2. UploadThing — <https://docs.uploadthing.com>, <https://github.com/pingdotgg/uploadthing> (MIT)
 
 ```ts
-const f = createUploadthing()
+const f = createUploadthing();
 export const uploadRouter = {
   avatar: f({ image: { maxFileSize: '2MB', maxFileCount: 1 } }, { awaitServerData: true })
     .input(z.object({ foo: z.string() }))
-    .middleware(({ req }) => auth(req))                 // return → metadata
+    .middleware(({ req }) => auth(req)) // return → metadata
     .onUploadComplete(({ metadata, file }) => ({ foo: 'bar' as const })), // typed to client
-} satisfies FileRouter
-export const { GET, POST } = createRouteHandler({ router: uploadRouter })   // needs UPLOADTHING_TOKEN
-export const { useUploadThing } = generateReactHelpers<typeof uploadRouter>()
+} satisfies FileRouter;
+export const { GET, POST } = createRouteHandler({ router: uploadRouter }); // needs UPLOADTHING_TOKEN
+export const { useUploadThing } = generateReactHelpers<typeof uploadRouter>();
 ```
 
 - Resume: `createUpload` exposes `pauseUpload` / `resumeUpload` while the presigned URL is valid; protocol HEAD `x-ut-range-start` + ranged PUT. **No documented cross-reload persistence.**
@@ -81,8 +81,8 @@ const { upload, progresses, isPending, control } = useUploadFiles({ route: 'imag
 
 ### npm name probes (404 = not published; does not prove scope/org is free)
 
-| free (404) | taken |
-|---|---|
+| free (404)                                                                                                                                                            | taken                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `@upkit/core`, `relay-upload`, `ferry-upload`, `uplift-upload`, `betterupload`, `better-uploads` (too close anyway), `@bu-draft/core` (placeholder used in this repo) | `resumable`, `upkit`, `haul`, `carryall`, `chunkwise`, `@better-upload/*` |
 
 ## 4. Alchemy v2 — <https://alchemy.run>, <https://github.com/alchemy-run/alchemy>

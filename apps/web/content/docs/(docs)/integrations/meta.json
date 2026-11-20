@@ -1,0 +1,19 @@
+{
+  "title": "Integrations",
+  "icon": "Plug",
+  "pages": [
+    "index",
+    "---Servers---",
+    "nextjs",
+    "tanstack-start",
+    "hono",
+    "express",
+    "fastify",
+    "elysia",
+    "bun",
+    "cloudflare-workers",
+    "---Backends & CMS---",
+    "convex",
+    "payload"
+  ]
+}

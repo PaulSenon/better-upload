@@ -1,0 +1,30 @@
+---
+title: Overview
+description: Mount the upload server in any framework; plug records into any backend.
+---
+
+The upload server is one standard **Fetch handler**: `uploads.fetch(request, context) → Response`. Every framework
+integration is a few lines that pass the request and your context (the user, a DB handle…), and a Node adapter covers
+`http`-style servers.
+
+Two rules apply everywhere:
+
+1. **Mount it on `basePath`** (default `/api/upload`), for every method (`GET` serves download links, `POST` the upload
+   protocol, `OPTIONS` CORS preflights when `cors` is set).
+2. **Don't let a body parser read the request first.** The server reads the raw JSON body itself.
+
+The SDK moves bytes and owns nothing else: your hooks decide keys and IDs and write your records, inline in
+`onUploadCompleted` or later from a sealed receipt (`uploads.verifyReceipt()`), see [Server](/docs/server#receipts).
+
+| Framework | Guide |
+|---|---|
+| Next.js (App Router) | [Next.js](/docs/integrations/nextjs) |
+| TanStack Start | [TanStack Start](/docs/integrations/tanstack-start) |
+| Hono | [Hono](/docs/integrations/hono) |
+| Express / Connect / Node `http` | [Express](/docs/integrations/express) |
+| Fastify | [Fastify](/docs/integrations/fastify) |
+| Elysia | [Elysia](/docs/integrations/elysia) |
+| Bun | [Bun](/docs/integrations/bun) |
+| Cloudflare Workers (+ R2 binding) | [Cloudflare Workers](/docs/integrations/cloudflare-workers) |
+| Convex (official component) | [Convex](/docs/integrations/convex) |
+| Payload CMS | [Payload](/docs/integrations/payload) |

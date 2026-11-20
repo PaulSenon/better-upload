@@ -1,0 +1,93 @@
+---
+title: Convex
+description: The official component — any S3-compatible bucket, resumable multipart, reactive pending uploads.
+---
+
+`@open-upload/convex` is a [Convex component](https://docs.convex.dev/components): bytes go from the browser straight to
+your bucket (AWS, R2, MinIO, any S3-compatible provider), Convex runs the small control requests in an HTTP action, and
+the component's tables keep a **reactive list of uploads**, so "your unfinished uploads" appears on every device and can
+be resumed from any of them.
+
+| | ConvexFS | `@open-upload/convex` |
+|---|---|---|
+| Storage | Bunny.net only | any S3-compatible bucket |
+| Bytes | proxied through Convex | browser → bucket directly |
+| Large files | single request | multipart, resumable for days |
+| Resume | ✗ | after a reload, and on another device |
+
+## Install
+
+```ts title="convex/convex.config.ts"
+import { defineApp } from 'convex/server';
+import openUpload from '@open-upload/convex/convex.config';
+
+const app = defineApp();
+app.use(openUpload);
+export default app;
+```
+
+```ts title="convex/uploads.ts"
+import { OpenUpload } from '@open-upload/convex';
+import { cloudflareR2, s3Storage } from '@open-upload/s3';
+import { createUploadServer, implement } from '@open-upload/server';
+import { components } from './_generated/api';
+import { query } from './_generated/server';
+import { contract } from '../src/contract';
+
+export const openUpload = new OpenUpload(components.openUpload);
+
+// Credentials stay in your app code: the component never sees them.
+export const storage = s3Storage({
+  provider: cloudflareR2({ accountId: process.env.R2_ACCOUNT_ID! }),
+  bucket: 'media',
+  credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID!, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY! },
+});
+
+const t = implement(contract).$context<{ convex: any; userId: string | undefined }>();
+
+export const uploads = createUploadServer({
+  storage,
+  secret: process.env.UPLOAD_SECRET!,
+  cors: { origin: [process.env.SITE_URL!] }, // the browser calls https://<deployment>.convex.site
+  router: t.router({
+    videos: openUpload.tracked(t.videos, { owner: ({ context }) => context.userId }).handler({
+      onUploadRequested: ({ context, sessionId, file }) => ({ key: `${context.userId}/${sessionId}/${file.name}` }),
+      onUploadCompleted: async ({ context, session }) => {
+        const mediaId = await context.convex.runMutation(internal.media.create, { key: session.key, owner: context.userId });
+        return { mediaId };
+      },
+    }),
+  }),
+});
+
+/** Reactive: pass `ticket` to `client.videos.resume(file, { ticket })` to continue on this device. */
+export const myPendingUploads = query({
+  handler: async (ctx) => openUpload.listPending(ctx, { owner: (await ctx.auth.getUserIdentity())?.subject }),
+});
+```
+
+```ts title="convex/http.ts"
+import { httpRouter } from 'convex/server';
+import { openUpload, uploads } from './uploads';
+
+const http = httpRouter();
+openUpload.registerRoutes(http, uploads, {
+  context: async (ctx) => ({ userId: (await ctx.auth.getUserIdentity())?.subject }),
+});
+export default http;
+```
+
+```ts title="convex/crons.ts"
+// Abort expired multipart uploads in the bucket so they stop costing money.
+crons.hourly('abort expired uploads', { minuteUTC: 7 }, internal.uploads.cleanup, {});
+// with: export const cleanup = internalAction({ handler: (ctx) => openUpload.cleanup(ctx, uploads, storage) });
+```
+
+On the client, point the SDK at the deployment's site URL:
+
+```ts
+const client = createUploadClient<typeof contract>({ baseUrl: `${import.meta.env.VITE_CONVEX_SITE_URL}/api/upload`, contract });
+```
+
+The package's [example app](https://github.com/PaulSenon/better-upload/tree/main/packages/convex/example/convex) is
+tested end to end in CI against a local Convex backend and MinIO.

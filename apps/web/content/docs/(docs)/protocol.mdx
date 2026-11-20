@@ -1,0 +1,24 @@
+---
+title: Wire protocol
+description: For other clients (Swift, Kotlin, CLI).
+icon: Network
+---
+
+`POST {basePath}/{endpoint}/{op}` with JSON bodies and the header `x-upload-protocol: 1` (it also forces a CORS
+preflight, which protects cookie-authenticated apps against CSRF).
+
+| Op | Request | Response |
+|---|---|---|
+| `init` | `{ input, files: [{ name, size, type, lastModified }] }` | `{ sessions: [{ sessionId, ticket, key, plan, expiresAt, resume }] }` |
+| `sign` | `{ ticket, parts: [{ partNumber, checksum? }] }` | `{ parts: [{ partNumber, request: { method, url, headers, expiresAt } }] }` |
+| `status` | `{ ticket }` | `{ state, uploadedParts, ticket, expiresAt, sessionId, file, key, plan, resume }` |
+| `complete` | `{ ticket }` | `{ output, receipt, alreadyCompleted }` |
+| `abort` | `{ ticket }` | `{ aborted: true }` |
+| `resolve` (download) | `{ input }` | `{ link, request, object }` |
+
+`GET {basePath}/{endpoint}?input=<json>` is the download link: `302` to a presigned URL.
+
+Errors: non-2xx with `{ error: { code, message, retryable, userAction, status, data } }`.
+
+Part bodies go straight to the storage with the signed request; send `request.headers` verbatim. Checksums are base64
+of the big-endian digest (S3 format).

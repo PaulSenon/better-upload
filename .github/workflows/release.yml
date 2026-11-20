@@ -1,0 +1,191 @@
+# The ONLY workflow trusted by npm for the @open-upload/* packages (trusted publisher: this file +
+# environment "npm-release", stage-only). Renaming this file or that environment breaks publishing.
+#
+# Flow (docs/RELEASING.md), for every public package at once (one fixed version group):
+#   plan      -> preflight on the dispatched commit (no identity)
+#   build     -> install, test, build, pack each package ONCE (runs dependency code; no identity, no cache)
+#   stage     -> `npm stage publish` of those exact tarballs via OIDC (no checkout, no deps, no scripts)
+#   (human)   -> review the staged versions and approve them on npmjs.com with 2FA
+#   finalize  -> after approving environment "release-finalize": verify npm serves the same bytes,
+#                then tag and publish an immutable GitHub release per package
+# Disabled until the repository variable NPM_RELEASE_ENABLED is "true".
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_version:
+        description: "Exact version to release (must equal the version of every packages/*/package.json)"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false # never interrupt a release; GitHub keeps at most one pending run per group
+
+jobs:
+  plan:
+    name: plan
+    if: vars.NPM_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      dist_tag: ${{ steps.plan.outputs.dist_tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+      packages: ${{ steps.plan.outputs.packages }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+          package-manager-cache: false
+      - id: plan
+        env:
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          EXPECTED: ${{ inputs.confirm_version }}
+        run: node tooling/release/plan.mjs
+
+  build:
+    name: build
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    cache-mode: none # nothing restored from (or saved to) the Actions cache in the release path
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      integrities: ${{ steps.pack.outputs.integrities }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - run: test "$(pnpm --version)" = "10.33.3"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec biome ci .
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm check:packages # publint + are-the-types-wrong on the built packages
+      - id: pack
+        name: Pack once
+        env:
+          PACKAGES: ${{ needs.plan.outputs.packages }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: node tooling/release/pack.mjs "$RUNNER_TEMP/out"
+      - id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ needs.plan.outputs.version }}
+          path: ${{ runner.temp }}/out
+          retention-days: 30
+          if-no-files-found: error
+
+  stage:
+    name: stage
+    needs: [plan, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing (OIDC); this is the only job that can request it
+    cache-mode: none
+    steps:
+      # No checkout and no dependency install: nothing from the repository runs with the npm identity.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2 (digest mismatch fails by default)
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/in
+      - name: Verify and stage every package
+        env:
+          PACKAGES: ${{ needs.plan.outputs.packages }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          DIST_TAG: ${{ needs.plan.outputs.dist_tag }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          INTEGRITIES: ${{ needs.build.outputs.integrities }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ACTIONS_CACHE_MODE:-}" ] && [ "$ACTIONS_CACHE_MODE" != "none" ]; then echo "::error::cache must be disabled"; exit 1; fi
+          mkdir -p "$RUNNER_TEMP/clean" && cd "$RUNNER_TEMP/clean" # no project .npmrc in scope
+          npx --yes npm@11.21.2 --version # pinned npm: stage needs >= 11.15, OIDC >= 11.5.1
+          echo "### Staged \`$VERSION\` (dist-tag \`$DIST_TAG\`) from \`$SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          node -e 'for (const p of JSON.parse(process.env.PACKAGES)) console.log(p.name)' | while read -r name; do
+            slug="$(printf %s "$name" | sed -e 's#^@##' -e 's#/#__#')"
+            tgz="$RUNNER_TEMP/in/$slug/pkg.tgz"
+            test -f "$tgz"
+            expected="$(SLUG="$slug" node -e 'process.stdout.write(JSON.parse(process.env.INTEGRITIES)[process.env.SLUG] ?? "")')"
+            actual="sha512-$(openssl dgst -sha512 -binary "$tgz" | base64 -w0)"
+            if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then echo "::error::tarball integrity mismatch for $name"; exit 1; fi
+            tar -xOzf "$tgz" package/package.json | NAME="$name" node -e '
+              const m = JSON.parse(require("fs").readFileSync(0, "utf8"));
+              const extra = Object.keys(m.publishConfig ?? {}).filter((k) => k !== "access");
+              if (m.name !== process.env.NAME || m.version !== process.env.VERSION || extra.length) process.exit(1);'
+            npx --yes npm@11.21.2 stage publish "$tgz" --tag "$DIST_TAG" --access public --ignore-scripts --json | tee -a stage.json
+            echo "- \`$name@$VERSION\`: \`$actual\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+          {
+            echo ""
+            echo "Next: follow the approval checklist in docs/RELEASING.md, approve each staged package on"
+            echo "npmjs.com with 2FA, then approve the \`release-finalize\` environment for this run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  finalize:
+    name: finalize
+    needs: [plan, build, stage]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release-finalize # required reviewer: approve AFTER approving the staged versions on npm
+    cache-mode: none # kit W10
+    permissions:
+      contents: write # create the tags and the GitHub releases
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/in
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.2"
+          package-manager-cache: false
+      - name: Record every package (idempotent)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGES: ${{ needs.plan.outputs.packages }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          DIST_TAG: ${{ needs.plan.outputs.dist_tag }}
+          INTEGRITIES: ${{ needs.build.outputs.integrities }}
+        run: |
+          set -euo pipefail
+          node -e 'for (const p of JSON.parse(process.env.PACKAGES)) console.log([p.name, p.dir, p.tag].join("\t"))' |
+          while IFS=$'\t' read -r name dir tag; do
+            slug="$(printf %s "$name" | sed -e 's#^@##' -e 's#/#__#')"
+            NAME="$name" PACKAGE_DIR="$dir" TAG="$tag" \
+            EXPECTED_INTEGRITY="$(SLUG="$slug" node -e 'process.stdout.write(JSON.parse(process.env.INTEGRITIES)[process.env.SLUG])')" \
+              node tooling/release/finalize.mjs "$RUNNER_TEMP/in/$slug/pkg.tgz" "$RUNNER_TEMP/in/$slug/release-manifest.json"
+          done

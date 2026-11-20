@@ -1,0 +1,17 @@
+---
+title: Bun
+description: Bun.serve, no framework.
+---
+
+```ts
+import { uploads } from './uploads';
+
+Bun.serve({
+  port: 3000,
+  fetch(request) {
+    const { pathname } = new URL(request.url);
+    if (pathname.startsWith('/api/upload/')) return uploads.fetch(request, { user: null });
+    return new Response('Not found', { status: 404 });
+  },
+});
+```

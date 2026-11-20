@@ -17,30 +17,31 @@
 
 ## 2. Making "retry" work after expiry
 
-| Strategy | Retry (restart) | Resume after expiry | Cost / notes |
-|---|---|---|---|
-| (a) Long presigned URL | ✅ until expiry | ✅ until expiry | ≤ 7 days with IAM-user keys. URLs signed with STS or role credentials die when the credentials expire (often 1 h). It is a bearer link. |
-| (b) Stable `/d/:id` → 302 → fresh presigned URL | ✅ | ❌ in Chromium; Safari and Firefox **[unverified]** | Zero compute, and bytes go straight from the bucket. |
-| (b′) Stable `/d/:id` **streams the bytes** (edge proxy, Range/If-Range pass-through) | ✅ | ✅ in every browser's manager | Needs an edge proxy. Cloudflare Worker + R2 means zero egress and cheap compute. |
-| (c) CloudFront signed cookies | ✅ | ✅ if the cookie stays valid **[unverified]** | The URL stays clean. Requires CloudFront ([AWS](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-choosing-signed-urls-cookies.html)). |
-| (c′) Cloudflare HMAC token auth | ✅ | ✅ within the token lifetime | Pro plan or higher ([CF](https://developers.cloudflare.com/waf/custom-rules/use-cases/configure-token-authentication/)). |
+| Strategy                                                                             | Retry (restart) | Resume after expiry                                 | Cost / notes                                                                                                                                                            |
+| ------------------------------------------------------------------------------------ | --------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (a) Long presigned URL                                                               | ✅ until expiry | ✅ until expiry                                     | ≤ 7 days with IAM-user keys. URLs signed with STS or role credentials die when the credentials expire (often 1 h). It is a bearer link.                                 |
+| (b) Stable `/d/:id` → 302 → fresh presigned URL                                      | ✅              | ❌ in Chromium; Safari and Firefox **[unverified]** | Zero compute, and bytes go straight from the bucket.                                                                                                                    |
+| (b′) Stable `/d/:id` **streams the bytes** (edge proxy, Range/If-Range pass-through) | ✅              | ✅ in every browser's manager                       | Needs an edge proxy. Cloudflare Worker + R2 means zero egress and cheap compute.                                                                                        |
+| (c) CloudFront signed cookies                                                        | ✅              | ✅ if the cookie stays valid **[unverified]**       | The URL stays clean. Requires CloudFront ([AWS](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-choosing-signed-urls-cookies.html)). |
+| (c′) Cloudflare HMAC token auth                                                      | ✅              | ✅ within the token lifetime                        | Pro plan or higher ([CF](https://developers.cloudflare.com/waf/custom-rules/use-cases/configure-token-authentication/)).                                                |
 
 Egress costs:
+
 - **S3:** about $0.09/GB **[unverified tier]**. S3 → CloudFront transfer is free ([S3 pricing](https://aws.amazon.com/s3/pricing/)).
 - **R2:** egress is **free** ([R2 pricing](https://developers.cloudflare.com/r2/pricing/)).
 
-**Key insight:** to resume natively, the *final* URL must stay valid. "Unique per user" should therefore come from auth attached to a stable URL (a cookie, or a long revocable token), not from a short-lived URL.
+**Key insight:** to resume natively, the _final_ URL must stay valid. "Unique per user" should therefore come from auth attached to a stable URL (a cookie, or a long revocable token), not from a short-lived URL.
 
 ## 3. Managed (in-browser) download sinks
 
-| API | Chrome/Edge | Chrome Android | Firefox | Safari macOS / iOS |
-|---|---|---|---|---|
-| `showSaveFilePicker` (stream straight to the user's file) | 86 | 132 | ❌ | ❌ |
-| OPFS + `createSyncAccessHandle` (worker) | 86/102 | 109 | 111 | 15.2 |
-| `createWritable` | 86 | 109 | 111 | 26 (OPFS only) |
-| Service-worker-generated download | ✅ | ✅ | ✅ | 15.4 |
-| `navigator.share({ files })` | partial | ✅ | ❌ | 14 |
-| Background Fetch | 74 | 74 | ❌ | ❌ |
+| API                                                       | Chrome/Edge | Chrome Android | Firefox | Safari macOS / iOS |
+| --------------------------------------------------------- | ----------- | -------------- | ------- | ------------------ |
+| `showSaveFilePicker` (stream straight to the user's file) | 86          | 132            | ❌      | ❌                 |
+| OPFS + `createSyncAccessHandle` (worker)                  | 86/102      | 109            | 111     | 15.2               |
+| `createWritable`                                          | 86          | 109            | 111     | 26 (OPFS only)     |
+| Service-worker-generated download                         | ✅          | ✅             | ✅      | 15.4               |
+| `navigator.share({ files })`                              | partial     | ✅             | ❌      | 14                 |
+| Background Fetch                                          | 74          | 74             | ❌      | ❌                 |
 
 - **Memory Blob:** limited by RAM, and tabs crash on large files. Small files only.
 - **File System Access:** writes straight to disk, with no double disk use. It resumes if the handle is kept in IndexedDB. **Chromium only.** This is the best sink for tens of GB.

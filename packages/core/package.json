@@ -1,9 +1,44 @@
 {
-  "name": "@bu-draft/core",
-  "version": "0.0.0-design",
-  "private": true,
-  "description": "DESIGN DRAFT — types only, not implemented, never published. Placeholder scope.",
+  "name": "@open-upload/core",
+  "version": "0.0.0",
+  "description": "Contract builder, error model, protocol types and shared utilities (isomorphic, zero dependencies).",
   "license": "MIT",
   "type": "module",
-  "types": "./src/index.ts"
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PaulSenon/better-upload.git",
+    "directory": "packages/core"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:package": "publint && attw --pack . --profile esm-only"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "publint": "^0.3.25",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  }
 }

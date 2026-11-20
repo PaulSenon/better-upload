@@ -1,9 +1,59 @@
 {
-  "name": "@bu-draft/server",
-  "version": "0.0.0-design",
-  "private": true,
-  "description": "DESIGN DRAFT — types only, not implemented, never published. Placeholder scope.",
+  "name": "@open-upload/server",
+  "version": "0.0.0",
+  "description": "Implements an upload contract: typed hooks, sealed session tickets (no database), Fetch handler and Node adapter.",
   "license": "MIT",
   "type": "module",
-  "types": "./src/index.ts"
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PaulSenon/better-upload.git",
+    "directory": "packages/server"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "source": "./src/node.ts",
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    },
+    "./testing": {
+      "source": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:package": "publint && attw --pack . --profile esm-only"
+  },
+  "dependencies": {
+    "@open-upload/core": "workspace:^",
+    "jose": "catalog:"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@types/node": "catalog:",
+    "publint": "^0.3.25",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  }
 }

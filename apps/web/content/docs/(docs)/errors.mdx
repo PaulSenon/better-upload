@@ -1,0 +1,27 @@
+---
+title: Errors
+description: One error shape, typed per endpoint, with a suggested user action.
+icon: TriangleAlert
+---
+
+Every error has the same shape on both sides: `{ code, message, retryable, userAction, status?, data }`.
+`code` is a union of built-in codes and the codes declared in the contract, and `data` is typed per code:
+
+```ts
+const err = task.getSnapshot().error;
+if (err?.code === 'QUOTA_EXCEEDED') err.data.remainingBytes; // number
+```
+
+Throw declared errors from hooks with `errors('QUOTA_EXCEEDED', { data })`.
+
+| `userAction` | Typical codes | UI |
+|---|---|---|
+| `wait` | `NETWORK_ERROR`, `OFFLINE`, `STORAGE_THROTTLED` | Nothing: the SDK continues by itself. |
+| `retry` | `STORAGE_ERROR`, `INTEGRITY_MISMATCH` | Offer "Retry" (`task.retry()`). |
+| `reselect-file` | `FILE_MISMATCH`, `FILE_UNREADABLE` | Ask for the file again. |
+| `restart` | `SESSION_EXPIRED`, `SESSION_NOT_FOUND` | "This upload expired", then `task.restart()`. |
+| `change-file` | `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`, `TOO_MANY_FILES` | Explain the rule. |
+| `sign-in` | `UNAUTHORIZED` | Send to login. |
+| `contact-support` | `INTERNAL_ERROR`, `INPUT_INVALID` | Developer problem. |
+
+`BUILTIN_ERRORS` (from `@open-upload/core`) exposes the defaults of every built-in code.

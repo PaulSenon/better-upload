@@ -1,0 +1,58 @@
+---
+title: Introduction
+description: Copy-in shadcn/ui components on the headless upload engine.
+icon: Component
+---
+
+<UploadDemo />
+
+These components are distributed as a [shadcn registry](https://ui.shadcn.com/docs/registry): the CLI copies the source
+into your project (`components/upload/`), installs `@open-upload/react` and `@open-upload/client`, and pulls the shadcn
+primitives they use (`button`, `progress`) in **your** style. You own and edit the markup; the reliability lives in the
+engine.
+
+They use only standard shadcn tokens (`bg-muted`, `text-muted-foreground`, `bg-primary`, `border`, `ring`…), `cn()`
+from `@/lib/utils`, and `lucide-react` icons, so they follow your theme.
+
+## Install
+
+Pick items individually, or everything at once:
+
+<RegistryInstall item="upload" />
+
+### With the `@open-upload` namespace
+
+Add the registry once to `components.json`:
+
+```json title="components.json"
+{
+  "registries": {
+    "@open-upload": "https://<this-site>/r/{name}.json"
+  }
+}
+```
+
+then `npx shadcn@latest add @open-upload/upload-item @open-upload/upload-dropzone`.
+
+## Wiring
+
+```tsx
+import { useUpload } from '@open-upload/react';
+import { UploadDropzone } from '@/components/upload/upload-dropzone';
+import { UploadList } from '@/components/upload/upload-list';
+import { UploadResumeBanner } from '@/components/upload/upload-resume-banner';
+import { client } from '@/lib/upload-client'; // createUploadClient<typeof contract>(...)
+
+export function Uploader({ albumId }: { albumId: string }) {
+  const upload = useUpload(client.videos);
+  return (
+    <div className="space-y-4">
+      <UploadResumeBanner client={client} />
+      <UploadDropzone control={upload.control({ input: { albumId } })} />
+      <UploadList tasks={upload.tasks} />
+    </div>
+  );
+}
+```
+
+Every item is self-contained (it ships the files it needs), so adding several never conflicts: identical files are skipped.

@@ -1,0 +1,24 @@
+{
+  "title": "Documentation",
+  "description": "The library",
+  "root": true,
+  "icon": "BookOpen",
+  "pages": [
+    "index",
+    "quick-start",
+    "---Concepts---",
+    "contract",
+    "server",
+    "client",
+    "react",
+    "storage",
+    "---Guides---",
+    "resume",
+    "downloads",
+    "errors",
+    "integrations",
+    "---Reference---",
+    "limits",
+    "protocol"
+  ]
+}

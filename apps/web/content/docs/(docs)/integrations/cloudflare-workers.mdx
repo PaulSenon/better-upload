@@ -1,0 +1,45 @@
+---
+title: Cloudflare Workers
+description: Workers + R2, with downloads streamed through the R2 binding.
+---
+
+Uploads use R2's S3 API (presigned URLs); downloads can additionally stream through the Worker's **R2 binding**
+(`delivery: 'proxy'`), which makes interrupted browser downloads resumable at any time, with free egress.
+
+```ts title="src/worker.ts"
+import { cloudflareR2, s3Storage } from '@open-upload/s3';
+import { withR2Binding } from '@open-upload/s3/cloudflare';
+import { createUploadServer } from '@open-upload/server';
+import { router } from './router';
+
+interface Env {
+  BUCKET: R2Bucket;
+  R2_ACCOUNT_ID: string;
+  R2_ACCESS_KEY_ID: string;
+  R2_SECRET_ACCESS_KEY: string;
+  UPLOAD_SECRET: string;
+}
+
+export default {
+  fetch(request: Request, env: Env) {
+    const storage = withR2Binding(
+      s3Storage({
+        provider: cloudflareR2({ accountId: env.R2_ACCOUNT_ID }),
+        bucket: 'media',
+        credentials: { accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY },
+      }),
+      env.BUCKET,
+    );
+    const uploads = createUploadServer({ router, storage, secret: env.UPLOAD_SECRET });
+    return uploads.fetch(request, { user: null });
+  },
+};
+```
+
+In the download endpoint, opt into streaming:
+
+```ts
+onDownloadRequested: ({ input }) => ({ key: input.key, fileName: input.name, delivery: 'proxy' }),
+```
+
+Deploy with Wrangler or [Alchemy](https://alchemy.run) (`Cloudflare.Worker` + `Cloudflare.R2.Bucket`).

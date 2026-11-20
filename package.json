@@ -1,16 +1,39 @@
 {
-  "name": "better-upload-design",
+  "name": "open-upload-monorepo",
   "private": true,
-  "description": "DESIGN PHASE ONLY — specification, README draft and TypeScript interfaces. No runtime implementation.",
+  "description": "Type-safe, resumable uploads and downloads to your own S3-compatible storage. Name is provisional.",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@10.33.3",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "turbo run build --filter=./packages/*",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test && pnpm test:tooling",
+    "test:integration": "pnpm --filter @open-upload/integration-tests test:integration",
+    "test:e2e": "pnpm --filter @open-upload/e2e test:e2e",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "check:packages": "turbo run check:package --filter=./packages/*",
+    "minio:up": "docker compose -f tests/docker-compose.yml up -d --wait",
+    "minio:down": "docker compose -f tests/docker-compose.yml down -v",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "test:tooling": "node --test 'tooling/release/*.test.mjs' 'tooling/*.test.mjs'",
+    "site:build": "pnpm --filter @open-upload/web build:worker",
+    "check:workflows": "node tooling/check-workflows.mjs .github/workflows"
   },
   "devDependencies": {
-    "@types/node": "^22.20.5",
-    "@types/react": "^19.3.0",
-    "typescript": "^5.9.3",
-    "zod": "^4.6.7"
+    "@biomejs/biome": "2.6.7",
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "3.0.3",
+    "@types/node": "catalog:",
+    "turbo": "2.11.11",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "yaml": "2.9.1"
   }
 }

@@ -1,0 +1,71 @@
+{
+  "name": "@open-upload/convex",
+  "version": "0.0.0",
+  "description": "Convex component: resumable, multi-provider uploads with reactive pending-upload lists across devices.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PaulSenon/better-upload.git",
+    "directory": "packages/convex"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/client/index.ts",
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./convex.config": {
+      "source": "./src/component/convex.config.ts",
+      "types": "./dist/component/convex.config.d.ts",
+      "default": "./dist/component/convex.config.js"
+    },
+    "./convex.config.js": {
+      "source": "./src/component/convex.config.ts",
+      "types": "./dist/component/convex.config.d.ts",
+      "default": "./dist/component/convex.config.js"
+    },
+    "./_generated/component.js": {
+      "source": "./src/component/_generated/component.ts",
+      "types": "./dist/component/_generated/component.d.ts"
+    },
+    "./test": "./src/test.ts",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "codegen": "convex codegen --component-dir ./src/component",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:package": "publint"
+  },
+  "dependencies": {
+    "@open-upload/core": "workspace:^",
+    "@open-upload/server": "workspace:^"
+  },
+  "peerDependencies": {
+    "convex": "^1.25.0"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
+    "@types/node": "catalog:",
+    "convex": "^1.49.0",
+    "convex-test": "^0.0.70",
+    "publint": "^0.3.25",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "@open-upload/s3": "workspace:*",
+    "@open-upload/client": "workspace:*",
+    "vite": "catalog:"
+  }
+}

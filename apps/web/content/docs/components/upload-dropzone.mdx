@@ -1,0 +1,23 @@
+---
+title: Upload dropzone
+description: Drag and drop or click; bound to an endpoint's rules.
+---
+
+<DropzonePreview />
+
+<RegistryInstall item="upload-dropzone" />
+
+```tsx
+const upload = useUpload(client.videos);
+<UploadDropzone control={upload.control({ input: { albumId } })} />
+```
+
+| Prop | Type | |
+|---|---|---|
+| `control` | `UploadControl` | From `useUpload(endpoint).control(options)`: `accept`, `multiple`, rules, and the upload trigger. |
+| `label` | `string` | Main text. |
+| `hint` | `string` | Secondary text; defaults to accepted types and limits from the contract. |
+| `disabled` | `boolean` | |
+
+Files are validated against the contract on drop (type, size, count); rejected files go to `useUpload`'s `onFailed`.
+It is a `<label>` around a visually hidden `<input type="file">`: keyboard and screen readers work natively.

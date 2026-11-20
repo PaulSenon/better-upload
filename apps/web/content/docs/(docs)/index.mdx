@@ -1,0 +1,42 @@
+---
+title: Introduction
+description: Type-safe, resumable uploads and downloads to your own S3-compatible storage.
+icon: Album
+---
+
+> **Early preview.** The name is provisional and the packages are not published yet. APIs may still change.
+
+Uploading a 4 GB video from a phone on a train is still hard: connections drop, tabs get frozen, users come back
+days later. This SDK makes it boring:
+
+- **One contract, end-to-end types.** Declare an endpoint once. The server implements it, the client is derived from it.
+  Input, output and errors are inferred.
+- **Resumable for days.** Presigned multipart uploads with retries, adaptive concurrency, URL renewal and pause/resume.
+  After a reload, the user re-selects the file and the upload continues where it stopped.
+- **Never mixes files.** Before continuing, the SDK re-checksums parts of the re-selected file and compares them with what
+  the bucket stores.
+- **No database.** The server keeps nothing: each upload carries a sealed ticket, and the bucket is the source of truth.
+- **Your infrastructure.** Your bucket (AWS S3, Cloudflare R2, MinIO, any S3-compatible), your auth, your framework.
+- **Copy-in UI.** Headless React hooks plus [shadcn registry components](/docs/components).
+
+```
+ Browser                                Your server                       Your bucket
+ client (typed) ──init──────────────► onUploadRequested → key ──► CreateMultipartUpload
+        ◄── sealed ticket + plan ──── onUploadStarted
+        ──sign(parts)────────────────► presign UploadPart (short-lived)
+        ──────────── PUT part (presigned, checksum signed) ─────────────► stores + verifies
+        ──complete───────────────────► ListParts → CompleteMultipartUpload → onUploadCompleted
+        ◄── typed output ────────────
+```
+
+## Packages
+
+| Package | Purpose |
+|---|---|
+| `@open-upload/core` | Contract builder, error model, protocol types, checksums. Zero dependencies. |
+| `@open-upload/server` | Implements a contract: typed hooks, sealed tickets, Fetch handler, Node adapter. |
+| `@open-upload/s3` | S3-compatible storage adapter (AWS, R2, MinIO…): minimal SigV4 on Web Crypto, no AWS SDK. |
+| `@open-upload/client` | The upload engine: resumable multipart, retries, persistence, typed client. |
+| `@open-upload/react` | Hooks: `useUpload`, `useUploadTask`, `usePendingUploads`. |
+
+The `@open-upload` scope is a placeholder until the final name is chosen.

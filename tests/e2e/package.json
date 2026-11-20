@@ -1,0 +1,31 @@
+{
+  "name": "@open-upload/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --conditions=source server.ts",
+    "test:e2e": "playwright test",
+    "test:heavy": "node heavy/run.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@open-upload/client": "workspace:*",
+    "@open-upload/core": "workspace:*",
+    "@open-upload/react": "workspace:*",
+    "@open-upload/s3": "workspace:*",
+    "@open-upload/server": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "^6.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

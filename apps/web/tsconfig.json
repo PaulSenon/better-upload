@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "*.ts", ".source"],
+  "compilerOptions": {
+    "types": ["vite/client", "node"],
+    "lib": ["DOM", "DOM.Iterable", "ES2023"],
+    "paths": { "@/*": ["./src/*"] },
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false,
+    "verbatimModuleSyntax": false
+  }
+}

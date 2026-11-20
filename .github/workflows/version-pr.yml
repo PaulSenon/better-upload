@@ -1,0 +1,45 @@
+# Keeps a "Version packages" PR open on main while change notes are pending (Changesets). It only
+# writes a branch and a PR: no npm identity, no publish (that is release.yml, dispatched by hand).
+# Commits go through the GitHub API (the action's default), so no git credential is persisted and
+# dependency install scripts never see a token.
+#
+# Note: a PR opened with GITHUB_TOKEN does not trigger workflows. Before merging the version PR,
+# close and reopen it (or push a commit to it) so CI and the change-note check run on it.
+name: version-pr
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: version-pr
+  cancel-in-progress: false
+
+jobs:
+  version-pr:
+    name: version-pr
+    if: vars.NPM_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # the changeset-release/main branch
+      pull-requests: write # the version PR
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          version-script: pnpm version-packages
+          pr-title: "Version packages"
+          commit-message: "Version packages"
+          github-token: ${{ github.token }}
+          # Default (push-with-git-cli: false): commits through the GitHub API, no git credential.

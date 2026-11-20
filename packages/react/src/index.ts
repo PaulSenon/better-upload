@@ -1,61 +1,252 @@
-/**
- * @bu-draft/react — DESIGN DRAFT (types only, no runtime).
- * Thin bindings over the client stores (`useSyncExternalStore`). No markup: UI ships
- * separately as copy-in shadcn registry items (dropzone, progress, list, resume banner).
- */
-import type { ReactNode } from 'react';
-import type { ReadableStore, UploadContract, UploadSnapshot, UploadTask, DownloadContract, DownloadSnapshot, DownloadTask, BuiltinError, ContractRouter } from '@bu-draft/core';
-import type { EndpointUploadTask, UploadClient, UploadEndpointClient, UploadOptions, UploadableFile, DownloadEndpointClient, DownloadOptions } from '@bu-draft/client';
+import type {
+  DownloadEndpointClient,
+  DownloadSnapshot,
+  DownloadTask,
+  EndpointUploadTask,
+  ReadableStore,
+  UploadableFile,
+  UploadClient,
+  UploadClientRuntime,
+  UploadContract,
+  UploadEndpointClient,
+  UploadOptions,
+  UploadSnapshot,
+  UploadTask,
+} from '@open-upload/client';
+import type { BuiltinError, DownloadContract, EndpointError, FileRules, UploadErrorShape } from '@open-upload/core';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
-/** Subscribe to any SDK store with an optional selector (re-renders only when the selection changes). */
-export declare function useStoreSnapshot<T, S = T>(store: ReadableStore<T>, selector?: (value: T) => S): S;
+type AnyTask = UploadTask<any, any>;
+const EMPTY: readonly never[] = [];
+const noopStore: ReadableStore<undefined> = { getSnapshot: () => undefined, subscribe: () => () => {} };
 
-/** Snapshot of a single task. */
-export declare function useUploadTask<TOutput, TError extends { code: string }>(
-  task: UploadTask<TOutput, any> | undefined,
-): UploadSnapshot<TOutput, any> | undefined;
+/** Subscribes to any SDK store; with a selector, re-renders only when the selected value changes. */
+export function useStore<T, S = T>(store: ReadableStore<T>, selector?: (value: T) => S): S {
+  const select = selector ?? ((v: T) => v as unknown as S);
+  return useSyncExternalStore(
+    store.subscribe,
+    () => select(store.getSnapshot()),
+    () => select(store.getSnapshot()),
+  );
+}
+
+/** Live snapshot of one task (`undefined` while there is no task). */
+export function useUploadTask<TOutput, TError extends UploadErrorShape>(
+  task: UploadTask<TOutput, TError> | undefined,
+): UploadSnapshot<TOutput, TError> | undefined {
+  return useStore((task ?? noopStore) as ReadableStore<UploadSnapshot<TOutput, TError> | undefined>);
+}
+
+type Snapshot<C extends UploadContract<any>> = ReturnType<EndpointUploadTask<C>['getSnapshot']>;
+
+/** Props for a headless dropzone / file input (the registry components take this as `control`). */
+export interface UploadControl {
+  /** `accept` attribute derived from the contract's file rules (when the contract value was given). */
+  readonly accept: string | undefined;
+  readonly multiple: boolean;
+  readonly rules: FileRules | undefined;
+  /** Starts uploads for the given files (validated against the contract rules first). */
+  onFiles(files: readonly UploadableFile[] | FileList): void;
+}
+
+export interface UseUploadOptions<C extends UploadContract<any>> {
+  /** Called once per task when it completes, with the typed output. */
+  onCompleted?: (output: NonNullable<Snapshot<C>['output']>, task: EndpointUploadTask<C>) => void;
+  /** Called when a task stops on an error (including client-side validation errors). */
+  onFailed?: (error: EndpointError<any>, task: EndpointUploadTask<C> | undefined) => void;
+}
 
 export interface UseUploadResult<C extends UploadContract<any>> {
-  /** Start uploads; returns the created tasks. */
-  upload(files: readonly UploadableFile[] | FileList, options: UploadOptions<C>): readonly EndpointUploadTask<C>[];
-  /** Tasks of this endpoint in this component (+ restored ones if `includeRestored`). */
+  /** Starts uploads. One file uses `upload()`, several use one batched `uploadMany()`. */
+  upload(
+    files: UploadableFile | readonly UploadableFile[] | FileList,
+    ...options: UploadArgs<C>
+  ): EndpointUploadTask<C>[];
+  /** Tasks started from this hook, oldest first. */
   readonly tasks: readonly EndpointUploadTask<C>[];
-  readonly snapshots: readonly ReturnType<EndpointUploadTask<C>['getSnapshot']>[];
+  readonly snapshots: readonly Snapshot<C>[];
+  /** True while any task is moving bytes or waiting to. */
   readonly isUploading: boolean;
-  /** Aggregate progress 0..1 over confirmed bytes. */
+  /** Aggregate progress over every task, 0..1. */
   readonly progress: number;
   pauseAll(): void;
   resumeAll(): void;
   cancelAll(): Promise<void>;
-  /** Headless control object for registry components (`<UploadDropzone control={...} />`). */
-  readonly control: UploadControl;
+  /** Forgets finished tasks (completed, canceled, expired, non-retryable failures). */
+  clearFinished(): void;
+  /** Headless props for a dropzone or `<input type="file">`, bound to `upload` with `options`. */
+  control(...options: UploadArgs<C>): UploadControl;
 }
 
-export interface UploadControl {
-  readonly accept?: string;
-  readonly multiple: boolean;
-  readonly disabled: boolean;
-  onFiles(files: readonly UploadableFile[]): void;
-}
+type UploadArgs<C extends UploadContract<any>> =
+  {} extends UploadOptions<C> ? [options?: UploadOptions<C>] : [options: UploadOptions<C>];
 
-export declare function useUpload<C extends UploadContract<any>>(
+const ACTIVE = new Set(['preparing', 'initializing', 'uploading', 'waiting-network', 'retrying', 'completing']);
+const FINISHED = new Set(['completed', 'canceled', 'expired']);
+
+/** Upload state for one endpoint, scoped to the component. */
+export function useUpload<C extends UploadContract<any>>(
   endpoint: UploadEndpointClient<C>,
-  options?: {
-    includeRestored?: boolean;
-    onComplete?: (output: ReturnType<EndpointUploadTask<C>['getSnapshot']>['output'], task: EndpointUploadTask<C>) => void;
-    onError?: (error: NonNullable<ReturnType<EndpointUploadTask<C>['getSnapshot']>['error']>, task: EndpointUploadTask<C>) => void;
-  },
-): UseUploadResult<C>;
+  options: UseUploadOptions<C> = {},
+): UseUploadResult<C> {
+  const [tasks, setTasks] = useState<readonly EndpointUploadTask<C>[]>(EMPTY);
+  const callbacks = useRef(options);
+  callbacks.current = options;
 
-/** Unfinished uploads restored from local persistence, typically shown as "Re-select file to continue". */
-export declare function usePendingUploads<T extends ContractRouter>(client: UploadClient<T>): readonly UploadTask<unknown, BuiltinError>[];
+  const store = useMemo<ReadableStore<readonly Snapshot<C>[]>>(() => {
+    let cached: readonly Snapshot<C>[] = EMPTY;
+    return {
+      getSnapshot: () => {
+        const next = tasks.map((t) => t.getSnapshot());
+        if (next.length !== cached.length || next.some((s, i) => s !== cached[i])) cached = next;
+        return cached;
+      },
+      subscribe: (listener) => {
+        const offs = tasks.map((t) => t.subscribe(listener));
+        return () => {
+          for (const off of offs) off();
+        };
+      },
+    };
+  }, [tasks]);
+  const snapshots = useStore(store);
 
-export declare function useDownload<C extends DownloadContract<any>>(
-  endpoint: DownloadEndpointClient<C>,
-): {
-  start(options: DownloadOptions<C>): DownloadTask;
-  readonly snapshot: DownloadSnapshot | undefined;
-};
+  // Fire onCompleted / onFailed once per task.
+  const reported = useRef(new Set<string>());
+  useEffect(() => {
+    snapshots.forEach((s, i) => {
+      const task = tasks[i]!;
+      const id = `${task.id}:${s.status}`;
+      if (reported.current.has(id)) return;
+      if (s.status === 'completed') {
+        reported.current.add(id);
+        callbacks.current.onCompleted?.(s.output as NonNullable<Snapshot<C>['output']>, task);
+      } else if (s.status === 'failed' || s.status === 'expired') {
+        reported.current.add(id);
+        if (s.error) callbacks.current.onFailed?.(s.error as EndpointError<any>, task);
+      }
+    });
+  }, [snapshots, tasks]);
 
-/** Optional provider: calls `$restore()` once and disposes on unmount. */
-export declare function UploadClientProvider<T extends ContractRouter>(props: { client: UploadClient<T>; children?: ReactNode }): ReactNode;
+  const upload = useCallback(
+    (files: UploadableFile | readonly UploadableFile[] | FileList, ...args: UploadArgs<C>) => {
+      const list = isFileLike(files) ? [files] : Array.from(files as ArrayLike<UploadableFile>);
+      if (list.length === 0) return [];
+      try {
+        const created =
+          list.length === 1
+            ? [endpoint.upload(list[0]!, ...(args as [any]))]
+            : endpoint.uploadMany(list, ...(args as [any]));
+        setTasks((prev) => [...prev, ...created]);
+        return created;
+      } catch (error) {
+        callbacks.current.onFailed?.(error as EndpointError<any>, undefined);
+        return [];
+      }
+    },
+    [endpoint],
+  );
+
+  const totals = snapshots.reduce(
+    (acc, s) => {
+      acc.total += s.progress.totalBytes;
+      acc.done +=
+        s.status === 'completed' ? s.progress.totalBytes : s.progress.confirmedBytes + s.progress.inflightBytes;
+      return acc;
+    },
+    { total: 0, done: 0 },
+  );
+
+  return {
+    upload,
+    tasks,
+    snapshots,
+    isUploading: snapshots.some((s) => ACTIVE.has(s.status)),
+    progress:
+      totals.total === 0
+        ? snapshots.length > 0 && snapshots.every((s) => s.status === 'completed')
+          ? 1
+          : 0
+        : totals.done / totals.total,
+    pauseAll: () => {
+      for (const t of tasks) t.pause();
+    },
+    resumeAll: () => {
+      for (const t of tasks) t.resume();
+    },
+    cancelAll: async () => {
+      await Promise.all(tasks.map((t) => t.cancel()));
+    },
+    clearFinished: () =>
+      setTasks((prev) =>
+        prev.filter((t) => {
+          const s = t.getSnapshot();
+          return !(FINISHED.has(s.status) || (s.status === 'failed' && !s.error?.retryable));
+        }),
+      ),
+    control: (...args: UploadArgs<C>) => ({
+      accept: endpoint.accept,
+      multiple: (endpoint.rules?.maxFiles ?? 1) > 1,
+      rules: endpoint.rules,
+      onFiles: (files) => {
+        upload(files, ...args);
+      },
+    }),
+  };
+}
+
+/**
+ * Unfinished uploads persisted on this device (after a reload or days later), usually shown as
+ * "Select the file again to continue". Calls `client.$restore()` once.
+ */
+export function usePendingUploads(client: UploadClientRuntime): readonly UploadTask<unknown, BuiltinError>[] {
+  const all = useStore(client.$tasks);
+  useEffect(() => {
+    void client.$restore();
+  }, [client]);
+  const statuses = useStore(
+    useMemo<ReadableStore<string>>(
+      () => ({
+        getSnapshot: () => all.map((t: AnyTask) => t.getSnapshot().status).join(','),
+        subscribe: (l) => {
+          const offs = all.map((t: AnyTask) => t.subscribe(l));
+          return () => {
+            for (const off of offs) off();
+          };
+        },
+      }),
+      [all],
+    ),
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `statuses` changes when any task changes status.
+  return useMemo(() => all.filter((t) => t.getSnapshot().status === 'needs-file'), [all, statuses]);
+}
+
+/** Snapshot of a managed download task (`endpoint.download(...)`), `undefined` while there is none. */
+export function useDownloadTask(task: DownloadTask<any> | undefined): DownloadSnapshot<any> | undefined {
+  return useStore((task ?? noopStore) as ReadableStore<DownloadSnapshot<any> | undefined>);
+}
+
+/**
+ * Managed download state for one endpoint. `start()` must be called from a click handler (the save dialog needs the
+ * user gesture). Without a managed sink available, it hands the stable link to the browser.
+ */
+export function useDownload<C extends DownloadContract<any>>(endpoint: DownloadEndpointClient<C>) {
+  const [task, setTask] = useState<DownloadTask<any>>();
+  const snapshot = useDownloadTask(task);
+  const start = useCallback(
+    (...options: Parameters<DownloadEndpointClient<C>['download']>) => {
+      const created = endpoint.download(...options);
+      setTask(created);
+      return created;
+    },
+    [endpoint],
+  );
+  return { start, task, snapshot } as const;
+}
+
+function isFileLike(value: unknown): value is UploadableFile {
+  return typeof Blob !== 'undefined' && value instanceof Blob;
+}
+
+export type { UploadClient, UploadEndpointClient, UploadSnapshot, UploadTask };

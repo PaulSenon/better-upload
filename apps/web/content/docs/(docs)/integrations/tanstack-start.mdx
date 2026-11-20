@@ -1,0 +1,18 @@
+---
+title: TanStack Start
+description: A server route.
+---
+
+```ts title="src/routes/api/upload/$.ts"
+import { createFileRoute } from '@tanstack/react-router';
+import { uploads } from '@/server/uploads';
+import { getUser } from '@/server/auth';
+
+const handle = async ({ request }: { request: Request }) => uploads.fetch(request, { user: await getUser(request) });
+
+export const Route = createFileRoute('/api/upload/$')({
+  server: { handlers: { GET: handle, POST: handle } },
+});
+```
+
+This very site is a TanStack Start app; its live demo runs the client engine in the browser.
