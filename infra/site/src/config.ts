@@ -2,6 +2,7 @@
 // infrastructure (alchemy.run.ts, scripts/cli.ts) and the release tooling. In privileged jobs it is
 // always read from the checkout of the default branch, never from a pull request.
 import { readFileSync } from "node:fs";
+import { validateSiteDomain, type SiteDomain } from "./domain.ts";
 import { validateHeaderRules } from "./stage.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,6 +24,11 @@ export interface DeliveryConfig {
     server: boolean;
     /** Entry module inside `server/` (default "index.js"; TanStack Start emits "server.js"). */
     serverEntry?: string;
+    /**
+     * Optional custom domain for PRODUCTION only (D12): { name, zoneId }. Attached by the owner
+     * (bootstrap.ts --domain-only), never by CI; previews stay on workers.dev.
+     */
+    domain?: SiteDomain;
     /** Project response headers for static assets, merged into the kit's (e.g. a CSP): pattern -> name -> value. */
     headers?: Record<string, Record<string, string>>;
     /** Cloudflare asset trailing-slash policy (default "auto-trailing-slash"; WebMCP: "drop-trailing-slash"). */
@@ -44,6 +50,11 @@ export interface DeliveryConfig {
      * github-actions[bot]. Only checks that run on BOTH pull_request and push (no PR-only check).
      */
     requiredChecks: string[];
+    /**
+     * PR-only checks the ruleset also requires (never gate deploys: they do not run on push).
+     * Default ["dependency-review"]; the template adds "changeset". Each must exist as a job.
+     */
+    prOnlyChecks?: string[];
     gateTimeoutMinutes: number;
   };
   release: {
@@ -76,6 +87,7 @@ export function validateConfig(raw: unknown): DeliveryConfig {
   if (typeof s.server !== "boolean") fail("site.server must be a boolean");
   try {
     validateHeaderRules(s.headers);
+    validateSiteDomain(s.domain);
   } catch (e) {
     fail((e as Error).message);
   }
@@ -89,6 +101,7 @@ export function validateConfig(raw: unknown): DeliveryConfig {
   if (!p.requiredChecks.includes(`${s.name}-build`)) fail(`previews.requiredChecks must include ${s.name}-build`);
   // The deploy writes the <name>-preview status itself: requiring it would let a deploy satisfy its own gate.
   if (p.requiredChecks.includes(`${s.name}-preview`)) fail(`previews.requiredChecks must not include ${s.name}-preview`);
+  if (p.prOnlyChecks !== undefined && (!Array.isArray(p.prOnlyChecks) || !p.prOnlyChecks.every((n) => typeof n === "string" && n.length > 0))) fail("previews.prOnlyChecks must list check names");
   if (!Number.isInteger(p.gateTimeoutMinutes) || p.gateTimeoutMinutes < 1 || p.gateTimeoutMinutes > 120) fail("previews.gateTimeoutMinutes must be 1..120");
   const r = c.release ?? fail("release is required");
   if (!Array.isArray(r.packages) || !r.packages.length || !r.packages.every((d) => REL_PATH.test(d))) fail("release.packages must list package directories");
