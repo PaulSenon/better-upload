@@ -141,7 +141,7 @@ Actions → `site-deploy` → *Run workflow*, with one of these inputs:
 - `pnpm --filter ./infra/site run check:local`: the real artifact served by workerd, then the smoke paths;
 - `pnpm check:workflows`.
 
-## 7. Divergences from the kit (kit v0.3.2)
+## 7. Divergences from the kit (kit v0.3.3)
 
 **Project configuration (the kit's documented extension points, not patches):**
 - `delivery.config.json`:
@@ -163,10 +163,9 @@ Actions → `site-deploy` → *Run workflow*, with one of these inputs:
 | Where | What | Why | Status |
 |---|---|---|---|
 | `release.yml`, `tooling/release/` | WebMCP-model release, kept (`vendor.mjs` keeps an existing release); `cache-mode: none` added on `finalize` (kit W10) | the kit's release converges on WebMCP's | until kit v0.2.0 |
-| `tooling/required-checks.mjs` (`local:`) + `tooling/required-checks.local.test.mjs` | expands `${{ matrix.<key> }}` job names over a static matrix, so `e2e (chromium)` … `e2e (mobile-safari)` count as produced checks | the kit skips every name with an expression, so `setup-github.mjs` refused this repository's ruleset ("required check(s) with no job") | reported to the kit |
 | `apps/web/scripts/build-worker.ts` | kept instead of the kit's `template/recipes/build-worker.ts` (derived from it). Same build and `browser`-condition fix; differs by passing `SITE_URL` to the site as `VITE_SITE_URL` (trailing slash removed) and a fixed `dist/deploy` instead of `SITE_OUT_DIR`; plugin name and quote style | the prerendered `npx shadcn add <origin>/r/…` commands must show each preview's own origin | permanent (project build) |
 
-Apart from `required-checks.mjs` (above), no vendored kit file carries a `local:` patch. v0.1.4 and v0.1.5 fixed every earlier one:
+No vendored kit file carries a `local:` patch. Kit versions v0.1.4–v0.3.3 fixed every earlier one (v0.3.3: matrix job names in required checks, placeholder `serverEntry`):
 - production `steps.fresh`;
 - `local-check` scope and default artifact;
 - `--ssr-fixture` values;
@@ -178,12 +177,12 @@ Apart from `required-checks.mjs` (above), no vendored kit file carries a `local:
 
 ## 8. Tested vs not tested
 
-**Tested locally (2026-11-16, kit v0.3.2 (f9a7275), no credentials):**
+**Tested locally (2026-11-16, kit v0.3.3 (b2593f7), no credentials):**
 - `pnpm site:build` with a preview `SITE_URL`;
 - `check-artifact` (180 files, server about 977 KiB gzip);
 - `check:local`: the real artifact in workerd, with every smoke path 2xx including `/api/search`, `noindex`, and
   404 on an unknown path; then the kit's SSR fixture (`/api/hello`);
-- 44 infra tests (kit + local) and 25 tooling tests (release + workflow invariants with mutations);
+- 45 infra tests (kit + local) and 27 tooling tests (release + workflow invariants with mutations);
 - actionlint 1.7.12, zizmor 1.32.0 pedantic, and `check-workflows` W1–W10: all clean.
 
 **Not tested** (needs the account):
