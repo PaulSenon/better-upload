@@ -19,7 +19,8 @@ On every PR and push to `main`, with no secret (`permissions: {}` by default, re
 | `dependency-review` | PR only: new vulnerable runtime dependencies (delivery kit) |
 | `site-build` (`site.yml`) | Credential-free Workers build of `apps/web`, output checks, local workerd smoke test, artifact |
 
-These names are the required checks of the branch ruleset and of the site deploy gate (`infra/site/src/gate.ts`).
+These names are the required checks of the branch ruleset and of the production deploy gate (`previews.requiredChecks`
+in `delivery.config.json`); previews only wait for `site-build` (`previews.gateChecks`).
 
 `cloud-tests.yml` (real R2 / AWS) runs on main only, on every push, on Tuesdays and on dispatch, when
 `CLOUD_TESTS_ENABLED=true`. It is never triggered by a PR. Its keys live in the `cloud-tests` environment, restricted
@@ -33,9 +34,11 @@ Runbook and bootstrap: [RELEASING.md](./RELEASING.md).
 
 ## Docs + registry site (`site.yml`, `site-deploy.yml`): off until `SITE_DEPLOY_ENABLED=true`
 
-Delivery kit (`.delivery-kit-version`, `delivery.config.json`). Unprivileged build, main-defined deploy of the prebuilt Worker, previews per non-draft PR after every required check
-of the exact commit is green, stable PR comment, teardown on close/merge/draft, weekly orphan sweep, production from
-`main`, rollback by run id. Settings, tokens, bootstrap, residual risk: [SITE-DEPLOY.md](./SITE-DEPLOY.md).
+Delivery kit (`.delivery-kit-version`, `delivery.config.json`). Unprivileged build, main-defined deploy of the
+prebuilt Worker. Automatic previews (kit D13): one per open PR, drafts included, as soon as `site-build` is green on
+the exact commit; stable PR comment; teardown on close or merge; hourly reconciliation sweep. Production from `main`
+after every required check is green; rollback by run id. Settings, tokens, bootstrap, residual risk:
+[SITE-DEPLOY.md](./SITE-DEPLOY.md).
 
 Docs and registry are one site, like ui.shadcn.com: pages under `/docs`, registry JSON under `/r/*.json`
 (`npx shadcn add https://<site>/r/upload.json`).

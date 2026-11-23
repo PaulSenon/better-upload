@@ -150,7 +150,8 @@ node tooling/setup-github.mjs --repo PaulSenon/better-upload --reviewer <ton log
 ```
 
 Relis la sortie, puis relance la même commande avec `--apply`. Elle crée :
-- les environnements `site-preview` et `site-production`, limités à `main` et sans reviewer ;
+- les environnements `site-preview` et `site-production`, limités à `main` et sans reviewer (previews automatiques,
+  décision du 22/11) ;
 - `npm-release` (sans reviewer : ta 2FA npm fait office de verrou) ;
 - `release-finalize` (reviewer : toi) ;
 - les secrets et variables du site ;
@@ -167,9 +168,10 @@ Supprime enfin le token temporaire dans Cloudflare.
 
 **Comment ça marche :**
 - **Push sur `main`** : la prod est mise à jour, après tous les checks verts sur ce commit.
-- **PR prête (pas en brouillon)** : la preview est déployée quand tous les checks de son dernier commit sont verts. Son
-  URL apparaît dans un commentaire unique, mis à jour à chaque push, et dans le statut `site-preview`.
-- **Fermeture, merge ou retour en brouillon** : la preview est retirée. Un nettoyage hebdomadaire rattrape les oublis.
+- **PR ouverte, brouillon compris** : la preview est déployée automatiquement dès que `site-build` est vert sur son
+  dernier commit, sans attendre les e2e (ceux-ci bloquent le merge et la prod). Son URL apparaît dans un commentaire
+  unique, mis à jour à chaque push, et dans le statut `site-preview`.
+- **Fermeture ou merge** : la preview est retirée. Un nettoyage toutes les heures rattrape les oublis.
 
 **Vérification :** ouvre une petite PR. Le workflow `site-deploy` passe vert, le commentaire affiche l'URL, et l'URL
 sert le site. Ferme la PR : le commentaire passe à « removed ».
