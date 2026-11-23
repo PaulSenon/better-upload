@@ -150,7 +150,7 @@ Actions → `site-deploy` → *Run workflow*, with one of these inputs:
 - `pnpm --filter ./infra/site run check:local`: the real artifact served by workerd, then the smoke paths;
 - `pnpm check:workflows`.
 
-## 7. Divergences from the kit (kit v0.4.0)
+## 7. Divergences from the kit (kit v0.4.1)
 
 **Project configuration (the kit's documented extension points, not patches):**
 - `delivery.config.json`:
@@ -187,13 +187,13 @@ No vendored kit file carries a `local:` patch. Kit versions v0.1.4–v0.3.3 fixe
 
 ## 8. Tested vs not tested
 
-**Tested locally (2026-11-16, kit v0.4.0 (1435531), no credentials):**
+**Tested locally (2026-11-16, kit v0.4.1 (2f217c6), no credentials):**
 - `pnpm site:build` with a preview `SITE_URL`;
 - `check-artifact` (180 files, server about 977 KiB gzip);
 - `check:local`: the real artifact in workerd, with every smoke path 2xx including `/api/search`, `noindex`, and
   404 on an unknown path; then the kit's SSR fixture (`/api/hello`);
-- 55 infra tests (kit + local) and 39 tooling tests (release + workflow invariants with mutations);
-- actionlint 1.7.12, zizmor 1.32.0 pedantic, and `check-workflows` W1–W11: all clean.
+- 58 infra tests (kit + local) and 47 tooling tests (release + workflow invariants with mutations);
+- actionlint 1.7.12, zizmor 1.32.0 pedantic, and `check-workflows` W1–W12: all clean.
 
 **Not tested** (needs the account):
 - a real deploy, destroy or sweep;
