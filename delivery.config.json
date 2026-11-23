@@ -35,6 +35,7 @@
       "workflow-lint",
       "site-build"
     ],
+    "gateChecks": ["site-build"],
     "gateTimeoutMinutes": 45
   },
   "release": {

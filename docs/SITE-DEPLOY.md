@@ -16,23 +16,27 @@ account is connected yet (§8).
 ## 1. The pipeline
 
 ```
-pull_request (opened, synchronize, reopened, ready_for_review, converted_to_draft, closed) / push main
+pull_request (opened, synchronize, reopened, closed) / push main
         │
         ▼
  site.yml  ── job `site-build`: no secret, contents: read
         │     pnpm site:build (SITE_URL = this stage's URL) → apps/web/dist/deploy = assets/ + server/server.js
         │     write-manifest · check-artifact · local workerd smoke test (smokePaths) · artifact `site`
-        ▼  (run completed)
+        │     (on `closed`: only the no-op `lifecycle` job)
+        ▼  (run requested / completed)
  site-deploy.yml  ── definition always from main (workflow_run / schedule / dispatch)
-        deploy-plan        no secret: run read back by id, PR resolved from the API (exact head, same repo),
-                           gate = every previews.requiredChecks of that SHA green (github-actions only)
-        deploy-preview     environment site-preview: hardened unzip, manifest == recomputed target,
+        deploy-plan        no secret: run read back by id, PR resolved from the API (exact head, same repo)
+        deploy-notify      PR comment progress states (waiting for the build, deploying, build failed, fork/bot)
+        deploy-preview     open PR, drafts included, gate = previews.gateChecks (`site-build`) green on the SHA;
+                           environment site-preview (no reviewer): hardened unzip, manifest == recomputed target,
                            Cloudflare.Worker({ main: server/server.js, bundle: false, assets }), smoke,
-                           re-check the PR after deploying (destroy if closed/drafted meanwhile)
-        deploy-teardown    PR closed, merged or converted to draft → destroy pr-<n> (idempotent)
+                           re-check the PR after deploying (destroy if closed meanwhile)
+        deploy-teardown    PR closed (merged or not) → destroy pr-<n> (idempotent)
         deploy-comment     one PR comment <!-- delivery-kit:better-upload:preview --> + status `site-preview`
-        deploy-production  environment site-production, only if the SHA is still the head of main; rollback
-        deploy-sweep       Mondays + dispatch: pr-<n> Workers ∪ Alchemy state stages whose PR is closed/draft/gone
+        deploy-production  gate = previews.requiredChecks green on the SHA; environment site-production,
+                           only if the SHA is still the head of main; rollback
+        deploy-sweep       HOURLY + dispatch: removes previews whose PR is no longer eligible, reports
+                           eligible PRs without one
 ```
 
 **Why a build job and a separate deploy workflow.**
@@ -49,8 +53,11 @@ pull_request (opened, synchronize, reopened, ready_for_review, converted_to_draf
 | `pr-<n>` | `better-upload-site-pr-<n>` | `better-upload-site-preview-state` |
 | `staging` | `better-upload-site-staging` (optional) | `better-upload-site-preview-state` |
 
-- **Previews:** one Worker per non-draft PR by default (`SITE_PREVIEW_MODE` = `dynamic`). Forks never get one.
-  Dependabot PRs are built only, unless `SITE_PREVIEW_DEPENDABOT=true`.
+- **Previews (automatic, kit D13, decided 2026-11-22):**
+  - one Worker per open PR, drafts included (`SITE_PREVIEW_MODE` = `dynamic`), deployed as soon as `site-build`
+    is green on its head, without waiting for e2e/integration (those gate the merge and production);
+  - no reviewer on `site-preview`;
+  - forks never get one; Dependabot PRs are built only, unless `SITE_PREVIEW_DEPENDABOT=true`.
 - **Headers:**
   - every static response carries `X-Delivery-Revision: main@<sha7>` or `pr-<n>@<sha7>`;
   - previews are `noindex`;
@@ -74,7 +81,7 @@ pull_request (opened, synchronize, reopened, ready_for_review, converted_to_draf
 
 | Kind | Name | Settings |
 |---|---|---|
-| Environment | `site-preview`, `site-production` | default branch only; no reviewer (optional: `--preview-reviewer`) |
+| Environment | `site-preview`, `site-production` | default branch only; no reviewer (previews are automatic; production reviewer only with `--production-reviewer`) |
 | Environment | `npm-release` | `main`, `next`; no reviewer (stage mode: npm 2FA approval is the gate) |
 | Environment | `release-finalize` | `main`, `next`; **required reviewer: the owner** |
 | Env secrets | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `SITE_STATE_TOKEN` | in each site environment, with different values |
@@ -88,9 +95,10 @@ pull_request (opened, synchronize, reopened, ready_for_review, converted_to_draf
 - `NPM_RELEASE_ENABLED=true`: see RELEASING.md.
 - The `cloud-tests` environment (main only; R2/AWS keys scoped to a test bucket) and `CLOUD_TESTS_ENABLED=true`.
 
-Required checks: `check`, `integration`, `convex`, `e2e (chromium)`, `e2e (firefox)`, `e2e (webkit)`,
-`e2e (mobile-safari)`, `workflow-lint` and `site-build`. All of them run on both PR and push, as the kit's gate
-rule requires.
+Required checks (`previews.requiredChecks`: merge ruleset and production gate): `check`, `integration`, `convex`,
+`e2e (chromium)`, `e2e (firefox)`, `e2e (webkit)`, `e2e (mobile-safari)`, `workflow-lint` and `site-build`. All of
+them run on both PR and push, as the kit's gate rule requires. Preview gate (`previews.gateChecks`): `site-build`
+only.
 
 ## 3. Tokens (one account, shared with WebMCP)
 
@@ -125,30 +133,32 @@ to `better-upload-site-staging`, avoids that risk.
 5. Delete the temporary token and every token file.
 6. `gh variable set SITE_DEPLOY_ENABLED --body true`.
 
-## 5. Owner decision: approval on previews
+## 5. Previews are automatic
 
-Previews' secrets are main-only, so a reviewer is optional. Recommended: none.
+Decided 2026-11-22 (kit D13): no reviewer on `site-preview`. Its secrets are main-only, so PR code never sees
+them; the remaining risk is the account-wide preview token (§3).
 
 ## 6. Operations
 
 Actions → `site-deploy` → *Run workflow*, with one of these inputs:
 - **`rollback_run_id`:** an older successful `site` run of a push to main;
 - **`destroy_pr`:** tear down the preview of a PR number;
-- **`sweep`:** run the orphan sweep now.
+- **`sweep`:** run the reconciliation sweep now (it also runs hourly).
 
 **Locally:**
 - `pnpm site:build`;
 - `pnpm --filter ./infra/site run check:local`: the real artifact served by workerd, then the smoke paths;
 - `pnpm check:workflows`.
 
-## 7. Divergences from the kit (kit v0.3.4)
+## 7. Divergences from the kit (kit v0.4.1)
 
 **Project configuration (the kit's documented extension points, not patches):**
 - `delivery.config.json`:
   - Worker `better-upload-site` and `serverEntry: server.js`;
   - `htmlHandling: drop-trailing-slash`, because the site's links have no trailing slash;
   - smoke paths, including `/api/search`, which replaces a static bare-import check;
-  - gate list `previews.requiredChecks`;
+  - `previews.requiredChecks` (merge ruleset + production gate) and `previews.gateChecks: ["site-build"]`
+    (preview gate, written out although it is the default);
   - `site.headers`: CSP with `worker-src blob:` for the demo's hashing workers, HSTS, X-Frame-Options,
     Permissions-Policy, COOP, and immutable `/assets/*`.
 - `ci.yml` is project-owned: `check`, `integration`, `convex`, the 4 `e2e`, `workflow-lint`, plus the kit's
@@ -177,13 +187,13 @@ No vendored kit file carries a `local:` patch. Kit versions v0.1.4–v0.3.3 fixe
 
 ## 8. Tested vs not tested
 
-**Tested locally (2026-11-16, kit v0.3.4 (768301f), no credentials):**
+**Tested locally (2026-11-16, kit v0.4.1 (2f217c6), no credentials):**
 - `pnpm site:build` with a preview `SITE_URL`;
 - `check-artifact` (180 files, server about 977 KiB gzip);
 - `check:local`: the real artifact in workerd, with every smoke path 2xx including `/api/search`, `noindex`, and
   404 on an unknown path; then the kit's SSR fixture (`/api/hello`);
-- 45 infra tests (kit + local) and 31 tooling tests (release + workflow invariants with mutations);
-- actionlint 1.7.12, zizmor 1.32.0 pedantic, and `check-workflows` W1–W10: all clean.
+- 58 infra tests (kit + local) and 47 tooling tests (release + workflow invariants with mutations);
+- actionlint 1.7.12, zizmor 1.32.0 pedantic, and `check-workflows` W1–W12: all clean.
 
 **Not tested** (needs the account):
 - a real deploy, destroy or sweep;

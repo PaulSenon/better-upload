@@ -101,5 +101,5 @@
   replaced by the placeholder bootstrap. `scripts/publish.mjs` removed.
 - CI: stable job names (= required checks), `permissions: {}`, workflow-lint (zizmor pedantic + actionlint), real
   R2/AWS tests moved to a main-only environment.
-- Adopted the Monorepo Delivery Kit v0.3.4 (768301f; site `site`), replacing the hand-port of WebMCP's infra.
+- Adopted the Monorepo Delivery Kit v0.4.1 (2f217c6; site `site`; automatic previews D13, decided 2026-11-22), replacing the hand-port of WebMCP's infra.
   Divergences marked `local:` and listed in docs/SITE-DEPLOY.md §7. Release kept on the WebMCP model until kit v0.2.0.

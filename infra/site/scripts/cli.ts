@@ -3,28 +3,44 @@
 // In privileged jobs this file always comes from the default branch's checkout.
 //
 //   node infra/site/scripts/cli.ts <command>
-//   plan | fetch-artifact | build-target | write-manifest | pr-target | pr-check | main-check | gate | check-artifact | after-deploy | smoke | comment | sweep | delete-worker | preflight
+//   plan | fetch-artifact | build-target | write-manifest | pr-target | pr-check | main-check | gate | check-artifact | after-deploy | smoke | comment | sweep | orphan-check | delete-worker | preflight
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { MANIFEST, checkArtifact } from "../src/artifact.ts";
-import { checkManifest, pickPr, planFromRun, type PrInfo, type RunInfo } from "../src/deploy-plan.ts";
+import { checkManifest, pickPr, planFromRun, type PolicyContext, type PrInfo, type RunInfo } from "../src/deploy-plan.ts";
 import { safeUnzip } from "../src/unzip.ts";
 import { join } from "node:path";
 import { cloudflare, github, redact, type GitHubClient } from "../src/api.ts";
 import { isMainOnly, isolationDecision, probeStateStore, storeDecision, verifyToken, workerAccess } from "../src/isolation.ts";
-import { loadConfig, previewMode, serverEntry } from "../src/config.ts";
+import { gateChecksFor, loadConfig, previewMode, serverEntry } from "../src/config.ts";
 import { evaluateChecks, type CheckRun, type CommitStatus } from "../src/gate.ts";
-import { afterDeploy, findComment, isOrphan, previewAction, previewNumbers, previewNumbersFromState, renderComment, type CommentStatus, type IssueComment, type PullRequest } from "../src/preview.ts";
+import { afterDeploy, commentState, findComment, isOrphan, previewAction, previewNumbers, previewNumbersFromState, renderComment, shouldWrite, type CommentStatus, type IssueComment, type PullRequest } from "../src/preview.ts";
 import { productionUrl } from "../src/domain.ts";
+import { installedStoreVersion } from "../src/store-version.ts";
 import { prStage, revisionLabel, stateStoreFor, stateStoreUrl, workerName, workersDevUrl } from "../src/stage.ts";
 
-const config = loadConfig();
-const base = config.site.worker;
+// Per-command env table (v0.4.1, WebMCP run 45280320094: after-deploy lacked DEFAULT_BRANCH).
+// Every read goes through env(); a name the table does not declare for the running command throws,
+// so the table is complete; required names must be MAPPED by the step (checked at startup, before
+// any side effect, and statically by check-workflows W12).
+type EnvSpec = { required: string[]; optional?: string[] };
+const COMMAND_ENV = JSON.parse(readFileSync(new URL("./command-env.json", import.meta.url), "utf8")) as Record<string, EnvSpec>;
+const commandName = process.argv[2] ?? "";
+const spec: EnvSpec = COMMAND_ENV[commandName] ?? { required: [] };
 const env = (name: string, required = true): string => {
+  if (!spec.required.includes(name) && !(spec.optional ?? []).includes(name)) throw new Error(`cli.ts ${commandName} reads ${name}, which scripts/command-env.json does not declare for it`);
+  if (required && !spec.required.includes(name)) throw new Error(`cli.ts ${commandName}: ${name} is read as required but declared optional`);
   const v = process.env[name] ?? "";
   if (required && !v) throw new Error(`${name} is required`);
   return v;
 };
+const unmapped = spec.required.filter((n) => !(n in process.env));
+if (COMMAND_ENV[commandName] && unmapped.length) {
+  console.error(`::error::cli.ts ${commandName}: the step does not map ${unmapped.join(", ")} (scripts/command-env.json)`);
+  process.exit(1);
+}
+const config = loadConfig();
+const base = config.site.worker;
 function output(values: Record<string, string | number | boolean>) {
   const lines = Object.entries(values).map(([k, v]) => {
     const s = String(v);
@@ -36,7 +52,15 @@ function output(values: Record<string, string | number | boolean>) {
 }
 const repo = () => env("REPO");
 const defaultBranch = () => env("DEFAULT_BRANCH");
-const gh = (): GitHubClient => github(env("GH_TOKEN"));
+/** GITHUB_API_URL: runner-provided (GHES); a local fake in tests. */
+const API = process.env.GITHUB_API_URL || "https://api.github.com";
+const gh = (): GitHubClient => github(env("GH_TOKEN"), { api: API });
+/** The preview policy context (D13): one source for plan, re-checks and sweep. */
+const policy = (): PolicyContext => ({ repo: repo(), defaultBranch: defaultBranch(), botPreviews: env("BOT_PREVIEWS", false) === "true" });
+const botVar = `${config.site.name.toUpperCase()}_PREVIEW_DEPENDABOT`;
+function summary(markdown: string) {
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
+}
 
 async function getPr(client: GitHubClient, n: number): Promise<PullRequest | undefined> {
   try {
@@ -68,34 +92,43 @@ const commands: Record<string, () => Promise<void>> = {
   /**
    * deploy-plan: what to do for a completed <site> run. Only RUN_ID comes from the event; the run,
    * the PR (several lookups, must have this exact head) and the default branch's head come from
-   * the API (deploy-plan.ts). Outputs kind = preview | teardown | production | skip.
+   * the API (deploy-plan.ts). Outputs kind = preview | teardown | production | skip, and `notice`
+   * (building | deploying | build-failed | not-deployed-fork | not-deployed-bot) for the comment.
+   * TRIGGER = the workflow_run activity (requested | completed).
    */
   async plan() {
     const client = gh();
     const runId = env("RUN_ID");
     if (!/^\d+$/.test(runId)) throw new Error("RUN_ID must be a number");
+    const trigger = env("TRIGGER");
+    if (trigger !== "requested" && trigger !== "completed") throw new Error("TRIGGER must be requested or completed");
     const run = await client.get<RunInfo>(`/repos/${repo()}/actions/runs/${runId}`);
-    const owner = repo().split("/")[0];
     const candidates: PrInfo[] = [];
-    if (run.head_repository?.full_name === repo() && run.event === "pull_request") {
-      for (const n of new Set((run.pull_requests ?? []).map((p) => p.number))) {
-        const pr = await getPr(client, n);
-        if (pr) candidates.push(pr as unknown as PrInfo);
+    if (run.event === "pull_request" && run.head_repository) {
+      const sameRepo = run.head_repository.full_name === repo();
+      const owner = sameRepo ? repo().split("/")[0] : run.head_repository.owner?.login;
+      if (sameRepo) {
+        for (const n of new Set((run.pull_requests ?? []).map((p) => p.number))) {
+          const pr = await getPr(client, n);
+          if (pr) candidates.push(pr as unknown as PrInfo);
+        }
+        candidates.push(...(await client.list<PrInfo>(`/repos/${repo()}/commits/${run.head_sha}/pulls?per_page=100`)));
       }
-      if (run.head_branch) candidates.push(...(await client.list<PrInfo>(`/repos/${repo()}/pulls?state=all&per_page=100&head=${encodeURIComponent(`${owner}:${run.head_branch}`)}`)));
-      candidates.push(...(await client.list<PrInfo>(`/repos/${repo()}/commits/${run.head_sha}/pulls?per_page=100`)));
+      // Fork runs: only to SAY "not deployed: fork PR" (pickPr still requires this exact head from that fork).
+      if (run.head_branch && owner && /^[\w.-]+$/.test(owner)) candidates.push(...(await client.list<PrInfo>(`/repos/${repo()}/pulls?state=all&per_page=100&head=${encodeURIComponent(`${owner}:${run.head_branch}`)}`)));
     }
     const pr = pickPr(candidates, run, repo());
-    const mainHead = run.event === "push" ? (await client.get<{ sha: string }>(`/repos/${repo()}/commits/${defaultBranch()}`)).sha : undefined;
+    const mainHead = run.event === "push" && trigger === "completed" ? (await client.get<{ sha: string }>(`/repos/${repo()}/commits/${defaultBranch()}`)).sha : undefined;
     let plan = planFromRun({
       run,
+      trigger,
       repo: repo(),
       defaultBranch: defaultBranch(),
       workflowPath: `.github/workflows/${config.site.name}.yml`,
       previews: config.previews.enabled,
       pr,
-      mode: previewMode(config),
-      botPreviews: process.env.BOT_PREVIEWS === "true",
+      mode: previewMode(config, env("PREVIEW_MODE", false)),
+      botPreviews: env("BOT_PREVIEWS", false) === "true",
       mainHead,
     });
     if (plan.action === "deploy-preview" || plan.action === "deploy-production") {
@@ -105,7 +138,8 @@ const commands: Record<string, () => Promise<void>> = {
     console.log(`plan for run ${runId} (${run.head_sha.slice(0, 7)}): ${plan.action} — ${plan.reason}`);
     const kind = { "deploy-preview": "preview", "teardown-preview": "teardown", "deploy-production": "production", skip: "skip" }[plan.action];
     const pn = "pr" in plan && plan.pr !== undefined ? plan.pr : undefined;
-    output({ kind, reason: plan.reason.replace(/[\r\n]/g, " "), run_id: runId, pr: pn ?? "", ...("stage" in plan ? targetOutputs(plan.stage, run.head_sha, pn) : { sha: run.head_sha }) });
+    const notice = "notice" in plan && plan.notice ? plan.notice : "";
+    output({ kind, notice, reason: plan.reason.replace(/[\r\n]/g, " "), run_id: runId, pr: pn ?? "", ...("stage" in plan ? targetOutputs(plan.stage, run.head_sha, pn) : { sha: run.head_sha }) });
   },
 
   /**
@@ -120,7 +154,7 @@ const commands: Record<string, () => Promise<void>> = {
     const artifact = list.find((a) => a.name === config.site.name && !a.expired);
     if (!artifact) throw new Error(`run ${runId} has no unexpired artifact ${config.site.name}`);
     if (artifact.size_in_bytes > 256 * 1024 * 1024) throw new Error("artifact larger than 256 MiB");
-    const res = await fetch(`https://api.github.com/repos/${repo()}/actions/artifacts/${artifact.id}/zip`, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "monorepo-delivery-kit" } });
+    const res = await fetch(`${API}/repos/${repo()}/actions/artifacts/${artifact.id}/zip`, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "monorepo-delivery-kit" } });
     if (!res.ok) throw new Error(`artifact download failed: HTTP ${res.status}`);
     const dest = env("DEST");
     const files = safeUnzip(Buffer.from(await res.arrayBuffer()), dest);
@@ -133,15 +167,15 @@ const commands: Record<string, () => Promise<void>> = {
 
   /** Stage outputs for a PR number (manual destroy, sweep). Dynamic mode only. */
   async "pr-target"() {
-    if (previewMode(config) !== "dynamic") throw new Error("per-PR stages exist only in dynamic preview mode");
+    if (previewMode(config, env("PREVIEW_MODE", false)) !== "dynamic") throw new Error("per-PR stages exist only in dynamic preview mode");
     const stage = prStage("dynamic", env("PR_NUMBER"));
     output({ stage, worker: workerName(base, stage), store: stateStoreFor(base, stage) });
   },
 
-  /** Is this SHA still the open, non-draft, same-repo head of the PR? (CI already green) */
+  /** Is this SHA still the head of an eligible PR (open, drafts included)? (CI already green) */
   async "pr-check"() {
     const pr = await getPr(gh(), Number(env("PR_NUMBER")));
-    const act = pr ? previewAction(pr, env("SHA"), "success", { repo: repo(), botPreviews: process.env.BOT_PREVIEWS === "true" }) : ({ action: "teardown", reason: "closed" } as const);
+    const act = pr ? previewAction(pr, env("SHA"), "success", policy()) : ({ action: "teardown", reason: "closed" } as const);
     const deploy = act.action === "deploy";
     if (!deploy) console.log(`::notice::preview not deployed: ${act.action === "teardown" ? act.reason : act.reason}`);
     output({ deploy });
@@ -155,9 +189,12 @@ const commands: Record<string, () => Promise<void>> = {
     output({ deploy: fresh });
   },
 
-  /** Wait (bounded) until every required check of this exact SHA is green; fail closed. */
+  /**
+   * Wait (bounded) until every check of GATE (preview: previews.gateChecks; production:
+   * previews.requiredChecks) of this exact SHA is green; fail closed.
+   */
   async gate() {
-    const required = config.previews.requiredChecks;
+    const required = gateChecksFor(config, env("GATE"));
     const client = gh();
     const sha = env("SHA");
     const deadline = Date.now() + config.previews.gateTimeoutMinutes * 60_000;
@@ -176,7 +213,7 @@ const commands: Record<string, () => Promise<void>> = {
   /** In the unprivileged build: stage, URL to bake in, artifact dir. Not trusted by the deploy. */
   async "build-target"() {
     const pr = env("PR_NUMBER", false);
-    const stage = pr ? prStage(previewMode(config), pr) : "production";
+    const stage = pr ? prStage(previewMode(config, env("PREVIEW_MODE", false)), pr) : "production";
     const subdomain = env("SUBDOMAIN", false);
     if (!subdomain) console.log("::notice::<SITE>_WORKERS_SUBDOMAIN is not set: building without SITE_URL");
     output({ stage, url: subdomain ? stageUrl(stage, subdomain) : "", dir: config.site.artifact });
@@ -192,7 +229,7 @@ const commands: Record<string, () => Promise<void>> = {
     const pr = env("PR_NUMBER", false);
     const sha = env("SHA");
     if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("SHA must be a full commit SHA");
-    const manifest = { sha, pr: pr ? Number(pr) : null, stage: env("STAGE"), event: env("EVENT"), action: process.env.ACTION || null };
+    const manifest = { sha, pr: pr ? Number(pr) : null, stage: env("STAGE"), event: env("EVENT"), action: env("ACTION", false) || null };
     writeFileSync(join(env("SITE_ARTIFACT_DIR"), MANIFEST), `${JSON.stringify(manifest)}\n`);
   },
 
@@ -204,8 +241,8 @@ const commands: Record<string, () => Promise<void>> = {
   },
 
   async "after-deploy"() {
-    const action = afterDeploy(await getPr(gh(), Number(env("PR_NUMBER"))));
-    if (action === "destroy") console.log("::warning::the PR was closed or drafted during the deploy: destroying the preview");
+    const action = afterDeploy(await getPr(gh(), Number(env("PR_NUMBER"))), policy());
+    if (action === "destroy") console.log("::warning::the PR was closed (or is no longer eligible) during the deploy: destroying the preview");
     output({ action });
   },
 
@@ -217,7 +254,7 @@ const commands: Record<string, () => Promise<void>> = {
   async smoke() {
     const url = env("SMOKE_URL");
     const revision = env("REVISION", false);
-    const soft = process.env.SMOKE_SOFT === "1";
+    const soft = env("SMOKE_SOFT", false) === "1";
     const attempts = soft ? 14 : 10; // soft: ~5 min of backoff
     for (const path of config.site.smokePaths) {
       let last = "";
@@ -261,15 +298,17 @@ const commands: Record<string, () => Promise<void>> = {
     const status = env("STATUS") as CommentStatus;
     const sha = env("SHA", false) || undefined;
     const url = env("URL", false) || undefined;
-    const body = renderComment({ project: config.project, status, sha, url, runUrl: env("RUN_URL"), reason: env("REASON", false) || undefined });
-    if (status === "deployed" || status === "failed") {
+    const body = renderComment({ project: config.project, status, sha, url, runUrl: env("RUN_URL"), reason: env("REASON", false) || undefined, botVar });
+    if (["building", "deploying", "deployed", "failed"].includes(status)) {
       const now = await getPr(client, pr);
       if (now && sha && now.head.sha !== sha) return console.log(`::notice::PR head moved to ${now.head.sha}: the newer run comments`);
     }
     const comments = await client.list<IssueComment>(`/repos/${repo()}/issues/${pr}/comments?per_page=100`);
     const existing = findComment(comments, config.project);
+    if (!shouldWrite(commentState(existing?.body), status, sha)) return console.log(`comment already shows ${commentState(existing?.body)?.status} for this commit`);
+    // A removal never CREATES a comment (nothing was announced); every other state does, once.
     if (existing) await client.send("PATCH", `/repos/${repo()}/issues/comments/${existing.id}`, { body });
-    else if (status === "deployed" || status === "failed") await client.send("POST", `/repos/${repo()}/issues/${pr}/comments`, { body });
+    else if (status !== "removed" && status !== "removal-failed") await client.send("POST", `/repos/${repo()}/issues/${pr}/comments`, { body });
     if (sha && (status === "deployed" || status === "failed")) {
       await client.send("POST", `/repos/${repo()}/statuses/${sha}`, {
         state: status === "deployed" ? "success" : "failure",
@@ -280,21 +319,53 @@ const commands: Record<string, () => Promise<void>> = {
     }
   },
 
-  /** Orphan preview Workers: PR closed, draft, from a fork, or gone. */
+  /**
+   * Reconciliation (hourly + manual). Scope: ONLY `<worker>-pr-<n>` Workers and `pr-<n>` stages of
+   * the preview state store (previewNumbers / previewNumbersFromState reject every other name).
+   * Orphan = PR not eligible (closed, gone, fork, other base, bot not opted in); drafts are kept.
+   * Also reports open eligible PRs without a preview Worker (missed deploy: re-run their build).
+   */
   async sweep() {
     const token = env("CLOUDFLARE_API_TOKEN");
     const cf = cloudflare(token);
-    const { body } = await cf.request<{ id: string }[]>("GET", `/accounts/${env("CLOUDFLARE_ACCOUNT_ID")}/workers/scripts`);
-    if (!body?.success) throw new Error(redact("cannot list Workers", [token]));
-    const fromWorkers = previewNumbers(base, body.result.map((s) => s.id));
+    const { status, body } = await cf.request<{ id: string }[]>("GET", `/accounts/${env("CLOUDFLARE_ACCOUNT_ID")}/workers/scripts`);
+    if (!body?.success) throw new Error(redact(`cannot list Workers: HTTP ${status}`, [token]));
+    const fromWorkers = previewNumbers(base, body.result.map((w) => w.id));
     const listFile = env("STATE_LIST_FILE", false);
-    const fromState = listFile && existsSync(listFile) ? previewNumbersFromState(readFileSync(listFile, "utf8"), `${config.project}-site`) : [];
+    const stateListed = Boolean(listFile && existsSync(listFile));
+    const fromState = stateListed ? previewNumbersFromState(readFileSync(listFile, "utf8"), `${config.project}-site`) : [];
+    // A preview Worker deployed by CI has a stage in the preview store: Workers but no stage at all
+    // = the listing is empty or not what we parse (v0.4.1: the store root was listed instead).
+    const stateNote = !stateListed ? "state list unavailable: sweeping by Worker list only" : fromWorkers.length && !fromState.length ? `state list empty or unparsable (${fromWorkers.length} preview Worker(s), 0 preview stage(s)): stages without a Worker cannot be found` : "";
+    if (stateNote) console.log(`::warning::${stateNote}`);
     const numbers = [...new Set([...fromWorkers, ...fromState])].sort((a, b) => a - b);
     const client = gh();
+    const ctx = policy();
     const orphans: number[] = [];
-    for (const n of numbers) if (isOrphan(await getPr(client, n), repo())) orphans.push(n);
-    console.log(`previews: workers [${fromWorkers.join(" ")}] state [${fromState.join(" ")}] orphans: [${orphans.join(" ")}]`);
+    const kept: number[] = [];
+    for (const n of numbers) (isOrphan(await getPr(client, n), ctx) ? orphans : kept).push(n);
+    const open = await client.list<PullRequest>(`/repos/${repo()}/pulls?state=open&per_page=100`);
+    const missing = previewMode(config, env("PREVIEW_MODE", false)) === "dynamic" ? open.filter((p) => !isOrphan(p, ctx) && !fromWorkers.includes(p.number)).map((p) => p.number) : [];
+    for (const n of missing) console.log(`::notice::PR #${n} is eligible but has no preview Worker (build red, still running, or a missed event: re-run its site workflow)`);
+    console.log(`previews: workers [${fromWorkers.join(" ")}] state [${fromState.join(" ")}] kept [${kept.join(" ")}] orphans [${orphans.join(" ")}] missing [${missing.join(" ")}]`);
+    summary(["### Preview sweep", "", ...(stateNote ? [`> ⚠️ ${stateNote}`, ""] : []), `Workers: ${fromWorkers.map((n) => `#${n}`).join(" ") || "—"} · state stages: ${fromState.map((n) => `#${n}`).join(" ") || "—"}`, "", "| found | kept | orphans (to remove) | eligible without preview |", "|---|---|---|---|", `| ${numbers.length} | ${kept.map((n) => `#${n}`).join(" ") || "—"} | ${orphans.map((n) => `#${n}`).join(" ") || "—"} | ${missing.map((n) => `#${n}`).join(" ") || "—"} |`, ""].join("\n"));
     output({ orphans: orphans.join(" ") });
+  },
+
+  /** Right before a sweep destroys pr-<n>: still an orphan? (a reopen during the sweep wins) */
+  async "orphan-check"() {
+    const orphan = isOrphan(await getPr(gh(), Number(env("PR_NUMBER"))), policy());
+    if (!orphan) console.log(`::notice::PR #${env("PR_NUMBER")} is eligible again: kept`);
+    output({ orphan });
+  },
+
+  /** One line of the sweep summary (removed / failed / kept). */
+  async "sweep-report"() {
+    const n = env("PR_NUMBER");
+    if (!/^\d+$/.test(n)) throw new Error("PR_NUMBER must be a number");
+    const result = env("RESULT");
+    if (!["removed", "failed", "kept"].includes(result)) throw new Error("RESULT must be removed, failed or kept");
+    summary(`- #${n}: ${result}${result === "failed" ? " (retried by the next sweep)" : ""}`);
   },
 
   /** Fallback after `alchemy destroy`: a preview Worker without state is deleted directly. */
@@ -316,7 +387,7 @@ const commands: Record<string, () => Promise<void>> = {
    */
   async preflight() {
     const stage = env("STAGE");
-    const mode = previewMode(config);
+    const mode = previewMode(config, env("PREVIEW_MODE", false));
     const accountId = env("CLOUDFLARE_ACCOUNT_ID");
     const cfToken = env("CLOUDFLARE_API_TOKEN");
     const cf = cloudflare(cfToken);
@@ -325,9 +396,12 @@ const commands: Record<string, () => Promise<void>> = {
 
     const store = stateStoreFor(base, stage);
     if (env("SITE_STATE_STORE") !== store) throw new Error(`SITE_STATE_STORE must be ${store} for stage ${stage}`);
-    const { STATE_STORE_VERSION } = (await import("alchemy/State")) as { STATE_STORE_VERSION: number };
+    // The CLOUDFLARE store's version (installed @alchemy.run/cloudflare), not alchemy/State's generic
+    // HTTP contract version (v0.3.5: the first real CI deploy compared v8 against 5).
+    const expected = installedStoreVersion();
+    console.log(`state store: @alchemy.run/cloudflare ${expected.packageVersion} expects state API v${expected.version}`);
     const probe = await probeStateStore(stateStoreUrl(store, env("SUBDOMAIN")), env("SITE_STATE_TOKEN"));
-    const storeOk = storeDecision(probe, STATE_STORE_VERSION, store);
+    const storeOk = storeDecision(probe, expected.version, store);
     if (!storeOk.ok) throw new Error(storeOk.reason);
 
     const environment = env("ENVIRONMENT");
@@ -347,11 +421,12 @@ const commands: Record<string, () => Promise<void>> = {
     });
     if (!decision.ok) throw new Error(decision.reason);
     for (const note of decision.notes) console.log(`::notice::${note}`);
+    for (const w of decision.warnings ?? []) console.log(`::warning::${w}`);
     console.log(`preflight ok: ${stage} (mode ${mode}), account token ${verified.status}, ${store} v${probe.version}, ${environment}: reviewers ${reviewers}, default-branch-only ${protection.mainOnly}`);
   },
 };
 
-const name = process.argv[2] ?? "";
+const name = commandName;
 const command = commands[name];
 if (!command) {
   console.error(`usage: cli.ts <${Object.keys(commands).join(" | ")}>`);
